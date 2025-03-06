@@ -15,7 +15,7 @@ Doc: https://docs.ergo.services/extra-library/actors/saga
 ## sqrs 
 [![MIT license](https://img.shields.io/badge/license-MIT-brightgreen.svg)](https://opensource.org/licenses/MIT)
 
-Implements CQRS design pattern allowing to route incoming message flow based on the defined rules
+Implements CQRS design pattern allowing to route incoming message flow based on the defined condition
 
 Doc: https://docs.ergo.services/extra-library/actors/cqrs
 
