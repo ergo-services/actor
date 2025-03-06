@@ -16,9 +16,6 @@ type Actor struct {
 
 	condition Condition
 	handlers  map[gen.Atom]*handler
-
-	forwarded uint64
-	restarts  uint64
 }
 
 type Condition func(message any) gen.Atom
@@ -31,8 +28,10 @@ type Handler struct {
 
 type handler struct {
 	Handler
-	sbeavior string
-	pid      gen.PID
+	sbeavior  string
+	pid       gen.PID
+	forwarded uint64
+	restarts  uint64
 }
 
 type Options struct {
@@ -273,7 +272,7 @@ func (a *Actor) forward(message *gen.MailboxMessage) bool {
 
 	err = a.Forward(h.pid, message, gen.MessagePriorityNormal)
 	if err == nil {
-		a.forwarded++
+		h.forwarded++
 		return true
 	}
 
@@ -289,8 +288,8 @@ func (a *Actor) forward(message *gen.MailboxMessage) bool {
 		}
 		a.Forward(pid, message, gen.MessagePriorityNormal)
 		h.pid = pid
-		a.forwarded++
-		a.restarts++
+		h.forwarded++
+		h.restarts++
 		return true
 	}
 
@@ -316,5 +315,18 @@ func (a *Actor) HandleEvent(message gen.MessageEvent) error {
 	return nil
 }
 func (a *Actor) HandleInspect(from gen.PID, item ...string) map[string]string {
-	return map[string]string{}
+	inspect := make(map[string]string)
+
+	for name, h := range a.handlers {
+		k := fmt.Sprintf("%s:restarts", name)
+		inspect[k] = fmt.Sprintf("%d", h.restarts)
+		k = fmt.Sprintf("%s:forwarded", name)
+		inspect[k] = fmt.Sprintf("%d", h.forwarded)
+		k = fmt.Sprintf("%s:behavior", name)
+		inspect[k] = h.sbeavior
+		k = fmt.Sprintf("%s:PID", name)
+		inspect[k] = h.pid.String()
+	}
+
+	return inspect
 }
