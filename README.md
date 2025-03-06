@@ -12,12 +12,12 @@ This actor implements Saga design pattern - a sequence of transactions that upda
 
 Doc: https://docs.ergo.services/extra-library/actors/saga
 
-## cron
+## sqrs 
 [![MIT license](https://img.shields.io/badge/license-MIT-brightgreen.svg)](https://opensource.org/licenses/MIT)
 
-Implements crontab-like scheduler
+Implements CQRS design pattern allowing to route incoming message flow based on the defined rules
 
-Doc: https://docs.ergo.services/extra-library/actors/cron
+Doc: https://docs.ergo.services/extra-library/actors/cqrs
 
 ## acme
 [![MIT license](https://img.shields.io/badge/license-MIT-brightgreen.svg)](https://opensource.org/licenses/MIT)
