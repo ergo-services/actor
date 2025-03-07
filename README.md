@@ -12,7 +12,7 @@ This actor implements Saga design pattern - a sequence of transactions that upda
 
 Doc: https://docs.ergo.services/extra-library/actors/saga
 
-## sqrs 
+## cqrs 
 [![MIT license](https://img.shields.io/badge/license-MIT-brightgreen.svg)](https://opensource.org/licenses/MIT)
 
 Implements CQRS design pattern allowing to route incoming message flow based on the defined condition
