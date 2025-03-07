@@ -18,10 +18,3 @@ Doc: https://docs.ergo.services/extra-library/actors/saga
 Implements CQRS design pattern allowing to route incoming message flow based on the defined condition
 
 Doc: https://docs.ergo.services/extra-library/actors/cqrs
-
-## acme
-[![MIT license](https://img.shields.io/badge/license-MIT-brightgreen.svg)](https://opensource.org/licenses/MIT)
-
-Provides automatic access to certificates from Let's Encrypt and any other ACME-based CA
-
-Doc: https://docs.ergo.services/extra-library/actors/acme
