@@ -18,7 +18,7 @@ type Actor struct {
 	handlers  map[gen.Atom]*handler
 }
 
-type Condition func(message any) gen.Atom
+type Condition func(from gen.PID, mtype gen.MailboxMessageType, message any) gen.Atom
 
 type Handler struct {
 	Name    gen.Atom
@@ -262,7 +262,7 @@ func (a *Actor) ProcessRun() (rr error) {
 func (a *Actor) forward(message *gen.MailboxMessage) bool {
 	var err error
 
-	name := a.condition(message.Message)
+	name := a.condition(message.From, message.Type, message.Message)
 
 	// checking for the handler
 	h, exist := a.handlers[name]
