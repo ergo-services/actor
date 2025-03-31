@@ -21,8 +21,8 @@ type Actor struct {
 type Condition func(from gen.PID, mtype gen.MailboxMessageType, message any) gen.Atom
 
 type Handler struct {
-	Name    gen.Atom
 	Factory gen.ProcessFactory
+	Options gen.ProcessOptions
 	Args    []any
 }
 
@@ -36,7 +36,7 @@ type handler struct {
 
 type Options struct {
 	Condition Condition
-	Handlers  []Handler
+	Handlers  map[gen.Atom]Handler
 }
 
 type Behavior interface {
@@ -103,28 +103,22 @@ func (a *Actor) ProcessInit(process gen.Process, args ...any) (rr error) {
 	a.condition = options.Condition
 	a.handlers = make(map[gen.Atom]*handler)
 
-	hopt := gen.ProcessOptions{
-		LinkParent: true,
-	}
-
-	for _, h := range options.Handlers {
-		if h.Name == "" {
-			return fmt.Errorf("handler name can not be empty")
-		}
+	for name, h := range options.Handlers {
 		if h.Factory == nil {
-			return fmt.Errorf("factory is not defined for %s", h.Name)
+			return fmt.Errorf("factory is not defined for %s", name)
 		}
-		if _, exist := a.handlers[h.Name]; exist == true {
-			return fmt.Errorf("handler name %s is already exist", h.Name)
+		if _, exist := a.handlers[name]; exist == true {
+			return fmt.Errorf("handler name %s is already exist", name)
 		}
+		h.Options.LinkParent = true
 
-		pid, err := a.Spawn(h.Factory, hopt, h.Args...)
+		pid, err := a.Spawn(h.Factory, h.Options, h.Args...)
 		if err != nil {
 			return err
 		}
 		pi, _ := a.Node().ProcessInfo(pid)
 
-		a.handlers[h.Name] = &handler{
+		a.handlers[name] = &handler{
 			Handler:  h,
 			pid:      pid,
 			sbeavior: pi.Behavior,
@@ -278,10 +272,7 @@ func (a *Actor) forward(message *gen.MailboxMessage) bool {
 
 	if err == gen.ErrProcessUnknown || err == gen.ErrProcessTerminated {
 		// restart
-		opt := gen.ProcessOptions{
-			LinkParent: true,
-		}
-		pid, err := a.Spawn(h.Factory, opt, h.Args...)
+		pid, err := a.Spawn(h.Factory, h.Options, h.Args...)
 		if err != nil {
 			a.Log().Error("unable to spawn new handler process: %s", err)
 			return false
