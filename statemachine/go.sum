@@ -1,2 +1,4 @@
 ergo.services/ergo v1.999.300 h1:bc24HqjaObObkagVknG42uIqbYEXxECRlrHWIR4PnPI=
 ergo.services/ergo v1.999.300/go.mod h1:bLQ6PoO6Mz/8gVuzvPv3xfMfo1P9w6rZV1WnMXMeMdg=
+ergo.services/ergo v1.999.301-0.20250616192953-f37a173cbea9 h1:jpTi0Xe7gPvq3oG0EhxCpBr7jbCFMtk7eO9z5CZ9drg=
+ergo.services/ergo v1.999.301-0.20250616192953-f37a173cbea9/go.mod h1:bLQ6PoO6Mz/8gVuzvPv3xfMfo1P9w6rZV1WnMXMeMdg=
