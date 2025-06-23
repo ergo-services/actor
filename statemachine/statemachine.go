@@ -628,9 +628,11 @@ func (s *StateMachine[D]) invokeCallHandler(handler any, message *gen.MailboxMes
 	if isError, err := resultIsError(results); isError == true {
 		return nil, err
 	}
-	updateStateMachineWithResults(stateMachineValue, results)
+	err := updateStateMachineWithResults(stateMachineValue, results)
+	if err != nil {
+		return nil, err
+	}
 	result := results[2].Interface()
-
 	return result, nil
 }
 
