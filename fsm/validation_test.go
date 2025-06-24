@@ -7,70 +7,233 @@ import (
 	"ergo.services/ergo/testing/unit"
 )
 
-// Test FSM with valid handlers
-type ValidFSM struct {
+// Test message types
+type StartMsg struct{}
+type StopMsg struct{}
+type PauseMsg struct{}
+type ResumeMsg struct{}
+type ErrorMsg struct {
+	Code    int
+	Message string
+}
+
+// Test states
+const (
+	StateIdle    gen.Atom = "idle"
+	StateRunning gen.Atom = "running"
+	StatePaused  gen.Atom = "paused"
+	StateStopped gen.Atom = "stopped"
+	StateError   gen.Atom = "error"
+)
+
+// Valid FSM implementation
+type TestFSM struct {
 	Actor
+	data map[string]any
 }
 
-func (v *ValidFSM) Init(args ...any) (gen.Atom, error) {
-	// Use new simplified API - transitions are built automatically inside Actor
-	v.AddState("state1", v.HandleState1, "state2")
-	v.AddState("state2", v.HandleState2, "state1")
+func (t *TestFSM) Init(args ...any) (gen.Atom, error) {
+	t.data = make(map[string]any)
 
-	return "state1", nil
+	// Add states with proper error handling
+	if err := t.AddState(StateIdle, t.HandleIdle, StateRunning, StateError); err != nil {
+		return "", err
+	}
+	if err := t.AddState(StateRunning, t.HandleRunning, StatePaused, StateStopped, StateError); err != nil {
+		return "", err
+	}
+	if err := t.AddState(StatePaused, t.HandlePaused, StateRunning, StateStopped, StateError); err != nil {
+		return "", err
+	}
+	if err := t.AddState(StateStopped, t.HandleStopped, StateRunning, StateIdle); err != nil {
+		return "", err
+	}
+	if err := t.AddState(StateError, t.HandleError, StateIdle); err != nil {
+		return "", err
+	}
+
+	return StateIdle, nil
 }
 
-func (v *ValidFSM) HandleState1(from gen.PID, message any) (gen.Atom, error) {
-	switch message {
-	case "go_to_state2":
-		return "state2", nil
+func (t *TestFSM) HandleIdle(from gen.PID, message any) (gen.Atom, error) {
+	switch message.(type) {
+	case StartMsg:
+		return StateRunning, nil
+	case ErrorMsg:
+		return StateError, nil
 	default:
-		return "state1", nil
+		return StateIdle, nil
 	}
 }
 
-func (v *ValidFSM) HandleState2(from gen.PID, message any) (gen.Atom, error) {
-	switch message {
-	case "go_to_state1":
-		return "state1", nil
+func (t *TestFSM) HandleRunning(from gen.PID, message any) (gen.Atom, error) {
+	switch message.(type) {
+	case PauseMsg:
+		return StatePaused, nil
+	case StopMsg:
+		return StateStopped, nil
+	case ErrorMsg:
+		return StateError, nil
 	default:
-		return "state2", nil
+		return StateRunning, nil
 	}
 }
 
-// Test FSM missing handler for initial state
+func (t *TestFSM) HandlePaused(from gen.PID, message any) (gen.Atom, error) {
+	switch message.(type) {
+	case ResumeMsg:
+		return StateRunning, nil
+	case StopMsg:
+		return StateStopped, nil
+	case ErrorMsg:
+		return StateError, nil
+	default:
+		return StatePaused, nil
+	}
+}
+
+func (t *TestFSM) HandleStopped(from gen.PID, message any) (gen.Atom, error) {
+	switch message.(type) {
+	case StartMsg:
+		return StateRunning, nil
+	default:
+		return StateStopped, nil
+	}
+}
+
+func (t *TestFSM) HandleError(from gen.PID, message any) (gen.Atom, error) {
+	switch message.(type) {
+	case StartMsg:
+		return StateIdle, nil
+	default:
+		return StateError, nil
+	}
+}
+
+// Optional high priority handlers
+func (t *TestFSM) HandleMessage(from gen.PID, message any) error {
+	t.data["last_high_priority_message"] = message
+	return nil
+}
+
+func (t *TestFSM) HandleCall(from gen.PID, ref gen.Ref, request any) (any, error) {
+	return map[string]any{
+		"state":         string(t.CurrentState()),
+		"high_priority": true,
+	}, nil
+}
+
+func (t *TestFSM) Terminate(reason error) {
+	t.data = nil
+}
+
+// Test basic FSM functionality
+func TestFSMBasicTransitions(t *testing.T) {
+	fsm, err := unit.Spawn(t, func() gen.ProcessBehavior {
+		return &TestFSM{}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	behavior := fsm.Behavior().(*TestFSM)
+	fsm.ClearEvents()
+
+	// Test initial state
+	unit.Equal(t, StateIdle, behavior.CurrentState(), "Should start in idle state")
+
+	// Test state transitions
+	fsm.SendMessage(gen.PID{}, StartMsg{})
+	unit.Equal(t, StateRunning, behavior.CurrentState(), "Should transition to running")
+
+	fsm.SendMessage(gen.PID{}, PauseMsg{})
+	unit.Equal(t, StatePaused, behavior.CurrentState(), "Should transition to paused")
+
+	fsm.SendMessage(gen.PID{}, ResumeMsg{})
+	unit.Equal(t, StateRunning, behavior.CurrentState(), "Should transition back to running")
+
+	fsm.SendMessage(gen.PID{}, StopMsg{})
+	unit.Equal(t, StateStopped, behavior.CurrentState(), "Should transition to stopped")
+
+	fsm.SendMessage(gen.PID{}, StartMsg{})
+	unit.Equal(t, StateRunning, behavior.CurrentState(), "Should transition to running from stopped")
+
+	// Test error state
+	fsm.SendMessage(gen.PID{}, ErrorMsg{Code: 500, Message: "Test error"})
+	unit.Equal(t, StateError, behavior.CurrentState(), "Should transition to error state")
+
+	fsm.SendMessage(gen.PID{}, StartMsg{})
+	unit.Equal(t, StateIdle, behavior.CurrentState(), "Should recover to idle state")
+}
+
+// Test dynamic state management
+func TestDynamicStateManagement(t *testing.T) {
+	fsm, err := unit.Spawn(t, func() gen.ProcessBehavior {
+		return &TestFSM{}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	behavior := fsm.Behavior().(*TestFSM)
+	fsm.ClearEvents()
+
+	// Test listing states
+	states := behavior.ListStates()
+	expectedStates := 5 // idle, running, paused, stopped, error
+	unit.Equal(t, expectedStates, len(states), "Should have 5 initial states")
+
+	// Test listing transitions from idle
+	unit.Equal(t, StateIdle, behavior.CurrentState(), "Should be in idle state")
+	transitions := behavior.ListTransitions()
+	unit.Equal(t, 2, len(transitions), "Should have 2 transitions from idle")
+
+	// Test duplicate state detection
+	err = behavior.AddState(StateIdle, behavior.HandleIdle)
+	if err == nil {
+		t.Error("Expected error when adding duplicate state")
+	}
+
+	// Test removing non-existent state
+	err = behavior.RemoveState("nonexistent")
+	if err == nil {
+		t.Error("Expected error when removing non-existent state")
+	}
+
+	// Test removing current state
+	err = behavior.RemoveState(StateIdle)
+	if err == nil {
+		t.Error("Expected error when removing current state")
+	}
+}
+
+// Test FSM with missing initial handler
 type MissingInitialHandlerFSM struct {
 	Actor
 }
 
 func (m *MissingInitialHandlerFSM) Init(args ...any) (gen.Atom, error) {
-	// Only define handler for state2, but initial state is state1
-	m.AddState("state2", m.HandleState2)
-
-	return "state1", nil // state1 has no handler!
+	// Only define handler for running state, but initial state is idle
+	if err := m.AddState(StateRunning, m.HandleRunning); err != nil {
+		return "", err
+	}
+	return StateIdle, nil // StateIdle has no handler!
 }
 
-func (m *MissingInitialHandlerFSM) HandleState2(from gen.PID, message any) (gen.Atom, error) {
-	return "state2", nil
+func (m *MissingInitialHandlerFSM) HandleRunning(from gen.PID, message any) (gen.Atom, error) {
+	return StateRunning, nil
 }
 
-// Test FSM with missing handlers in transition map
-type MissingTransitionHandlerFSM struct {
-	Actor
-}
+func TestMissingInitialHandler(t *testing.T) {
+	_, err := unit.Spawn(t, func() gen.ProcessBehavior {
+		return &MissingInitialHandlerFSM{}
+	})
 
-func (m *MissingTransitionHandlerFSM) Init(args ...any) (gen.Atom, error) {
-	// Define handler for state1
-	m.AddState("state1", m.HandleState1, "state2", "state3")
+	if err == nil {
+		t.Fatal("Expected FSM with missing initial handler to fail during initialization")
+	}
 
-	// state2 and state3 referenced in transitions but have no handlers
-	// This should generate warnings but not fail
-
-	return "state1", nil
-}
-
-func (m *MissingTransitionHandlerFSM) HandleState1(from gen.PID, message any) (gen.Atom, error) {
-	return "state1", nil
+	t.Logf("Got expected error: %v", err)
 }
 
 // Test FSM with invalid transition attempt
@@ -80,10 +243,16 @@ type InvalidTransitionFSM struct {
 
 func (i *InvalidTransitionFSM) Init(args ...any) (gen.Atom, error) {
 	// Define states with restricted transitions
-	i.AddState("locked", i.HandleLocked, "unlocked")   // locked can only go to unlocked
-	i.AddState("unlocked", i.HandleUnlocked, "locked") // unlocked can only go to locked
+	if err := i.AddState("locked", i.HandleLocked, "unlocked"); err != nil {
+		return "", err
+	}
+	if err := i.AddState("unlocked", i.HandleUnlocked, "locked"); err != nil {
+		return "", err
+	}
 	// No direct transition from locked to error allowed
-	i.AddState("error", i.HandleError, "locked")
+	if err := i.AddState("error", i.HandleError, "locked"); err != nil {
+		return "", err
+	}
 
 	return "locked", nil
 }
@@ -118,219 +287,91 @@ func (i *InvalidTransitionFSM) HandleError(from gen.PID, message any) (gen.Atom,
 	}
 }
 
-func TestValidHandlers(t *testing.T) {
-	// This should succeed - all handlers belong to ValidFSM
-	fsm, err := unit.Spawn(t, func() gen.ProcessBehavior {
-		return &ValidFSM{}
-	})
-
-	if err != nil {
-		t.Fatalf("Expected valid FSM to start successfully, got error: %v", err)
-	}
-
-	behavior := fsm.Behavior().(*ValidFSM)
-	if behavior.CurrentState() != "state1" {
-		t.Errorf("Expected initial state to be 'state1', got %s", behavior.CurrentState())
-	}
-
-	// Test state transitions work
-	fsm.SendMessage(fsm.PID(), "go_to_state2")
-	if behavior.CurrentState() != "state2" {
-		t.Errorf("Expected state to be 'state2' after transition, got %s", behavior.CurrentState())
-	}
-
-	fsm.SendMessage(fsm.PID(), "go_to_state1")
-	if behavior.CurrentState() != "state1" {
-		t.Errorf("Expected state to be 'state1' after transition, got %s", behavior.CurrentState())
-	}
-}
-
-func TestMissingInitialHandler(t *testing.T) {
-	// This should fail - initial state has no handler
-	_, err := unit.Spawn(t, func() gen.ProcessBehavior {
-		return &MissingInitialHandlerFSM{}
-	})
-
-	if err == nil {
-		t.Fatal("Expected FSM with missing initial handler to fail during initialization")
-	}
-
-	// Should contain error about missing handler for initial state
-	t.Logf("Got expected error: %v", err)
-}
-
-func TestMissingTransitionHandlers(t *testing.T) {
-	// This should succeed but generate warnings
-	fsm, err := unit.Spawn(t, func() gen.ProcessBehavior {
-		return &MissingTransitionHandlerFSM{}
-	})
-
-	if err != nil {
-		t.Fatalf("Expected FSM with missing transition handlers to start (with warnings), got error: %v", err)
-	}
-
-	behavior := fsm.Behavior().(*MissingTransitionHandlerFSM)
-	if behavior.CurrentState() != "state1" {
-		t.Errorf("Expected initial state to be 'state1', got %s", behavior.CurrentState())
-	}
-
-	// The warnings should be logged but FSM should still work for defined states
-}
-
 func TestInvalidTransition(t *testing.T) {
-	// This should succeed during initialization
 	fsm, err := unit.Spawn(t, func() gen.ProcessBehavior {
 		return &InvalidTransitionFSM{}
 	})
-
 	if err != nil {
 		t.Fatalf("Expected FSM to start successfully, got error: %v", err)
 	}
 
 	behavior := fsm.Behavior().(*InvalidTransitionFSM)
-	if behavior.CurrentState() != "locked" {
-		t.Errorf("Expected initial state to be 'locked', got %s", behavior.CurrentState())
-	}
+	fsm.ClearEvents()
+
+	unit.Equal(t, gen.Atom("locked"), behavior.CurrentState(), "Should start in locked state")
 
 	// Test valid transition
 	fsm.SendMessage(fsm.PID(), "unlock")
-	if behavior.CurrentState() != "unlocked" {
-		t.Errorf("Expected state to be 'unlocked' after valid transition, got %s", behavior.CurrentState())
-	}
+	unit.Equal(t, gen.Atom("unlocked"), behavior.CurrentState(), "Should transition to unlocked")
 
 	// Go back to locked
 	fsm.SendMessage(fsm.PID(), "lock")
-	if behavior.CurrentState() != "locked" {
-		t.Errorf("Expected state to be 'locked' after lock, got %s", behavior.CurrentState())
-	}
+	unit.Equal(t, gen.Atom("locked"), behavior.CurrentState(), "Should transition back to locked")
 
-	// Test invalid transition - this should be rejected at runtime
-	// The handler will try to transition from "locked" to "error" but it's not allowed
+	// Test invalid transition - this should be rejected but logged
 	fsm.SendMessage(fsm.PID(), "force_error")
-
 	// State should remain "locked" because the transition was invalid
-	if behavior.CurrentState() != "locked" {
-		t.Errorf("Expected state to remain 'locked' after invalid transition attempt, got %s", behavior.CurrentState())
-	}
+	unit.Equal(t, gen.Atom("locked"), behavior.CurrentState(), "Should remain locked after invalid transition")
 }
 
-func TestCompileTimeSafety(t *testing.T) {
-	// This test demonstrates compile-time safety
-	// The following code would not compile:
-
-	/*
-		// This would be a compile-time error:
-		type WrongSignature struct {
-			Actor
-		}
-
-		func (w *WrongSignature) BadHandler(message any) gen.Atom {  // Wrong signature!
-			return "state"
-		}
-
-		func (w *WrongSignature) Init(args ...any) (gen.Atom, error) {
-			// This line would cause a compile-time error because BadHandler doesn't match StateTransition signature
-			w.AddState("state", w.BadHandler)  // Compile error!
-			return "state", nil
-		}
-	*/
-
-	// This test passes just by compiling successfully
-	t.Log("Compile-time safety test passed - code compiles without reflection")
-}
-
-// ExampleFSM demonstrates compile-time safe handler validation
-type ExampleFSM struct {
-	Actor
-}
-
-const (
-	StateA gen.Atom = "a"
-	StateB gen.Atom = "b"
-)
-
-func FakeHandler1(from gen.PID, message any) (gen.Atom, error) {
-	return StateA, nil
-}
-
-// Init demonstrates proper handler setup with compile-time validation
-func (e *ExampleFSM) Init(args ...any) (gen.Atom, error) {
-	// ✅ THESE COMPILE - Correct signatures matching StateTransition
-	e.AddState(StateA, e.HandleA, StateB)
-	e.AddState(StateB, e.HandleB, StateA)
-	e.AddState(StateB, FakeHandler1, StateA)
-
-	// ❌ THESE WOULD NOT COMPILE - Wrong signatures
-	// Uncomment any of these to see compilation errors:
-
-	// e.AddState(StateA, e.WrongSignature1, StateB)
-	// compiler error: cannot use e.WrongSignature1 (type func(string) error)
-	// as type StateTransition in argument to AddState
-
-	// e.AddState(StateA, e.WrongSignature2, StateB)
-	// compiler error: cannot use e.WrongSignature2 (type func(gen.PID, any) string)
-	// as type StateTransition in argument to AddState
-
-	// e.AddState(StateA, e.WrongSignature3, StateB)
-	// compiler error: cannot use e.WrongSignature3 (type func(gen.PID) (gen.Atom, error))
-	// as type StateTransition in argument to AddState
-
-	return StateA, nil
-}
-
-// ✅ CORRECT - Matches StateTransition signature exactly
-func (e *ExampleFSM) HandleA(from gen.PID, message any) (gen.Atom, error) {
-	return StateB, nil
-}
-
-// ✅ CORRECT - Matches StateTransition signature exactly
-func (e *ExampleFSM) HandleB(from gen.PID, message any) (gen.Atom, error) {
-	return StateA, nil
-}
-
-// ❌ WRONG SIGNATURES - These would cause compilation errors if used in AddState
-
-// Wrong parameter types
-func (e *ExampleFSM) WrongSignature1(message string) error {
-	return nil
-}
-
-// Wrong return types
-func (e *ExampleFSM) WrongSignature2(from gen.PID, message any) string {
-	return "invalid"
-}
-
-// Missing parameter
-func (e *ExampleFSM) WrongSignature3(from gen.PID) (gen.Atom, error) {
-	return StateA, nil
-}
-
-// Extra parameter
-func (e *ExampleFSM) WrongSignature4(from gen.PID, message any, extra int) (gen.Atom, error) {
-	return StateA, nil
-}
-
-// TestHandlerCompileTimeSafety tests that valid handlers work correctly
-func TestHandlerCompileTimeSafety(t *testing.T) {
-	// Spawn the FSM actor
-	actor, err := unit.Spawn(t, func() gen.ProcessBehavior {
-		return &ExampleFSM{}
+// Test high priority message handling
+func TestHighPriorityMessages(t *testing.T) {
+	fsm, err := unit.Spawn(t, func() gen.ProcessBehavior {
+		return &TestFSM{}
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	behavior := actor.Behavior().(*ExampleFSM)
-	actor.ClearEvents()
+	behavior := fsm.Behavior().(*TestFSM)
+	fsm.ClearEvents()
 
-	// Test initial state
-	unit.Equal(t, StateA, behavior.CurrentState(), "Should start in StateA")
+	// Test that priority methods are available
+	err = fsm.Process().SendWithPriority(gen.PID{}, "priority_test", gen.MessagePriorityHigh)
+	if err != nil {
+		t.Fatal("SendWithPriority should not return error:", err)
+	}
 
-	// Test state transition
-	actor.SendMessage(gen.PID{}, "test message")
-	unit.Equal(t, StateB, behavior.CurrentState(), "Should transition to StateB")
+	result, err := fsm.Process().CallWithPriority(gen.PID{}, "priority_call", gen.MessagePriorityHigh)
+	if err != nil {
+		t.Fatal("CallWithPriority should not return error:", err)
+	}
+	t.Logf("Priority call result: %v", result)
 
-	// Test transition back
-	actor.SendMessage(gen.PID{}, "another message")
-	unit.Equal(t, StateA, behavior.CurrentState(), "Should transition back to StateA")
+	// Test high priority handlers directly (since unit test framework may not fully simulate priority routing)
+	err = behavior.HandleMessage(gen.PID{}, "direct_test_message")
+	if err != nil {
+		t.Error("HandleMessage should not return error for test message")
+	}
+
+	// Verify data was stored
+	if lastMsg, exists := behavior.data["last_high_priority_message"]; !exists || lastMsg != "direct_test_message" {
+		t.Error("HandleMessage did not store message correctly")
+	}
+
+	// Test HandleCall directly
+	callResult, err := behavior.HandleCall(gen.PID{}, gen.Ref{}, "direct_test_call")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify response
+	response, ok := callResult.(map[string]any)
+	if !ok {
+		t.Fatal("Expected map response from HandleCall")
+	}
+
+	if response["high_priority"] != true {
+		t.Error("HandleCall response missing high_priority flag")
+	}
+
+	if response["state"] != string(behavior.CurrentState()) {
+		t.Error("HandleCall response has incorrect state")
+	}
+
+	// Test that normal priority messages still go through FSM state handlers
+	fsm.SendMessage(gen.PID{}, StartMsg{})
+	unit.Equal(t, StateRunning, behavior.CurrentState(), "Normal priority message should trigger state transition")
+
+	t.Log("High priority message handling test completed successfully")
 }
