@@ -29,7 +29,7 @@ type StateMachineBehavior[D any] interface {
 
 	CurrentState() gen.Atom
 
-	SetCurrentState(gen.Atom)
+	SetCurrentState(gen.Atom) error
 
 	Data() D
 
@@ -218,7 +218,7 @@ func (s *StateMachine[D]) CurrentState() gen.Atom {
 	return s.currentState
 }
 
-func (s *StateMachine[D]) SetCurrentState(state gen.Atom) {
+func (s *StateMachine[D]) SetCurrentState(state gen.Atom) error {
 	if state != s.currentState {
 		s.Log().Info("StateMachine: switching to state %s", state)
 		oldState := s.currentState
@@ -236,12 +236,13 @@ func (s *StateMachine[D]) SetCurrentState(state gen.Atom) {
 		if s.stateEnterCallback != nil {
 			newState, newData, err := s.stateEnterCallback(oldState, state, s.data, s)
 			if err != nil {
-				panic(fmt.Sprintf("error in StateEnterCallback for state %s", state))
+				return err
 			}
 			s.SetData(newData)
 			s.SetCurrentState(newState)
 		}
 	}
+	return nil
 }
 
 func (s *StateMachine[D]) Data() D {
@@ -600,9 +601,8 @@ func (s *StateMachine[D]) invokeMessageHandler(handler any, message *gen.Mailbox
 	if isError, err := resultIsError(results); isError == true {
 		return err
 	}
-	updateStateMachineWithResults(stateMachineValue, results)
 
-	return nil
+	return updateStateMachineWithResults(stateMachineValue, results)
 }
 
 func (s *StateMachine[D]) lookupCallHandler(messageType string) (any, bool) {
@@ -628,9 +628,11 @@ func (s *StateMachine[D]) invokeCallHandler(handler any, message *gen.MailboxMes
 	if isError, err := resultIsError(results); isError == true {
 		return nil, err
 	}
-	updateStateMachineWithResults(stateMachineValue, results)
+	err := updateStateMachineWithResults(stateMachineValue, results)
+	if err != nil {
+		return nil, err
+	}
 	result := results[2].Interface()
-
 	return result, nil
 }
 
@@ -669,7 +671,7 @@ func resultIsError(results []reflect.Value) (bool, error) {
 	return false, nil
 }
 
-func updateStateMachineWithResults(s reflect.Value, results []reflect.Value) {
+func updateStateMachineWithResults(s reflect.Value, results []reflect.Value) error {
 	// Check if any actions were returned. MessageHandler and EventHandler have
 	// the result tuple (gen.Atom, D, []Action, error) with the actions at index
 	// 2. CallHandler has the result typle (gen.Atom, D, R, []Action, error)
@@ -698,7 +700,12 @@ func updateStateMachineWithResults(s reflect.Value, results []reflect.Value) {
 	// they are defined for. A state enter callback could transition to another
 	// state which then will cancel the state timeout.
 	setCurrentStateMethod := s.MethodByName("SetCurrentState")
-	setCurrentStateMethod.Call([]reflect.Value{results[0]})
+	err := setCurrentStateMethod.Call([]reflect.Value{results[0]})[0]
+	if !err.IsNil() {
+		return err.Interface().(error)
+	}
+
+	return nil
 }
 
 func isSliceNilOrEmpty(resultValue reflect.Value) bool {
