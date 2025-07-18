@@ -220,7 +220,7 @@ func (s *StateMachine[D]) CurrentState() gen.Atom {
 
 func (s *StateMachine[D]) SetCurrentState(state gen.Atom) error {
 	if state != s.currentState {
-		s.Log().Info("StateMachine: switching to state %s", state)
+		s.Log().Debug("StateMachine: switching to state %s", state)
 		oldState := s.currentState
 		s.currentState = state
 
@@ -229,7 +229,7 @@ func (s *StateMachine[D]) SetCurrentState(state gen.Atom) error {
 		// touch it. Otherwise we should cancel the active state timeout if there
 		// is one.
 		if s.hasActiveStateTimeout() && s.stateTimeout.state != state {
-			s.Log().Info("StateMachine: canceling state timeout for state %s", state)
+			s.Log().Debug("StateMachine: canceling state timeout for state %s", state)
 			s.stateTimeout.cancel()
 		}
 		// Execute state enter callback until no new transition is triggered.
@@ -314,7 +314,7 @@ func (s *StateMachine[D]) ProcessInit(process gen.Process, args ...any) (rr erro
 	if len(s.eventHandlers) > 0 {
 		s.Send(s.PID(), startMonitoringEvents{})
 	}
-	s.Log().Info("StateMachine: started in state %s", s.currentState)
+	s.Log().Debug("StateMachine: started in state %s", s.currentState)
 
 	return nil
 }
@@ -390,7 +390,7 @@ func (s *StateMachine[D]) ProcessRun() (rr error) {
 						panic(fmt.Sprintf("Error monitoring event: %v.", err))
 					}
 				}
-				s.Log().Info("StateMachine: monitoring events")
+				s.Log().Debug("StateMachine: monitoring events")
 				return nil
 
 			default:
@@ -538,11 +538,11 @@ func startStateTimeout(ctx context.Context, state gen.Atom, message any, proc ge
 	case <-ctx.Done():
 		switch ctx.Err() {
 		case context.DeadlineExceeded:
-			proc.Log().Info("StateMachine: state timeout for state %s timed out", state)
+			proc.Log().Debug("StateMachine: state timeout for state %s timed out", state)
 			proc.Send(proc.PID(), message)
 			return
 		case context.Canceled:
-			proc.Log().Info("StateMachine: state timeout for state %s canceled", state)
+			proc.Log().Debug("StateMachine: state timeout for state %s canceled", state)
 			return
 		}
 	}
@@ -553,11 +553,11 @@ func startGenericTimeout(ctx context.Context, name gen.Atom, message any, proc g
 	case <-ctx.Done():
 		switch ctx.Err() {
 		case context.DeadlineExceeded:
-			proc.Log().Info("StateMachine: generic timeout %s timed out", name)
+			proc.Log().Debug("StateMachine: generic timeout %s timed out", name)
 			proc.Send(proc.PID(), message)
 			return
 		case context.Canceled:
-			proc.Log().Info("StateMachine: generic timeout %s canceled", name)
+			proc.Log().Debug("StateMachine: generic timeout %s canceled", name)
 			return
 		}
 	}
@@ -568,11 +568,11 @@ func startMessageTimeout(ctx context.Context, message any, proc gen.Process) {
 	case <-ctx.Done():
 		switch ctx.Err() {
 		case context.DeadlineExceeded:
-			proc.Log().Info("StateMachine: message timeout timed out")
+			proc.Log().Debug("StateMachine: message timeout timed out")
 			proc.Send(proc.PID(), message)
 			return
 		case context.Canceled:
-			proc.Log().Info("StateMachine: message timeout canceled")
+			proc.Log().Debug("StateMachine: message timeout canceled")
 			return
 		}
 	}
