@@ -57,16 +57,11 @@ func (m *MyMetrics) Init(args ...any) (metrics.Options, error) {
 	}, nil
 }
 
-func (m *MyMetrics) CollectMetrics() ([]string, error) {
+func (m *MyMetrics) CollectMetrics() error {
 	// Simulate collecting custom metrics
 	m.requestsTotal.Add(float64(rand.Intn(10)))
 	m.requestDuration.Observe(rand.Float64() * 2)
 	m.activeUsers.Set(float64(rand.Intn(100)))
 
-	// Return list of custom metric names (for logging)
-	return []string{
-		"my_app_requests_total",
-		"my_app_request_duration_seconds",
-		"my_app_active_users",
-	}, nil
+	return nil
 }
