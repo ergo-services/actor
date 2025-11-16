@@ -192,8 +192,8 @@ go build
 
 The example includes:
 - **Observer UI**: http://localhost:9911 - Web interface for inspecting processes and metrics
-- **Prometheus Metrics**: http://localhost:3000/metrics (default) or http://localhost:9090/metrics (custom)
-
+- **Prometheus Metrics**: http://localhost:3000/metrics
+  
 ## Best Practices
 
 1. **Custom Metrics**: Always register custom metrics in `Init()` before the HTTP server starts
