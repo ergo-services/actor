@@ -10,7 +10,9 @@ import (
 )
 
 func main() {
-	// Parse flags
+	// Default metrics factory to provide standard metrics
+	factory := metrics.Factory
+
 	custom := flag.Bool("custom", false, "Use custom metrics with user-defined metrics")
 	flag.Parse()
 
@@ -32,16 +34,12 @@ func main() {
 
 	n.Log().Info("Observer application started at: http://localhost:9911")
 
-	// Choose factory based on custom flag
-	var factory gen.ProcessFactory
-
+	// Extend default metrics with custom ones if -custom flag is set
 	if *custom {
 		factory = CustomFactory
-	} else {
-		factory = metrics.Factory
 	}
 
-	// Start metrics actor
+	// Spawn metrics actor
 	_, err = n.Spawn(factory, gen.ProcessOptions{})
 	if err != nil {
 		panic(err)

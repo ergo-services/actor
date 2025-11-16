@@ -3,7 +3,7 @@ module ergo.services/actor/metrics
 go 1.20
 
 require (
-	ergo.services/ergo v0.0.0
+	ergo.services/ergo v1.999.310
 	github.com/prometheus/client_golang v1.20.5
 )
 
@@ -18,5 +18,3 @@ require (
 	golang.org/x/sys v0.22.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 )
-
-replace ergo.services/ergo => ../../ergo

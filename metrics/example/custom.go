@@ -23,7 +23,6 @@ type MyMetrics struct {
 }
 
 func (m *MyMetrics) Init(args ...any) (metrics.Options, error) {
-	// Initialize custom metrics
 	m.requestsTotal = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "my_app_requests_total",
 		Help: "Total number of requests processed",
@@ -40,7 +39,6 @@ func (m *MyMetrics) Init(args ...any) (metrics.Options, error) {
 		Help: "Number of currently active users",
 	})
 
-	// Register custom metrics with the registry
 	m.Registry().MustRegister(
 		m.requestsTotal,
 		m.requestDuration,
@@ -49,10 +47,10 @@ func (m *MyMetrics) Init(args ...any) (metrics.Options, error) {
 
 	m.Log().Info("Using custom metrics with user-defined metrics")
 
-	// Return options
 	return metrics.Options{
-		Port:            9090,
-		Host:            "localhost",
+		// Use default port and host, or uncomment to customize
+		// Port:            9090,
+		// Host:            "localhost",
 		CollectInterval: 5 * time.Second,
 	}, nil
 }
