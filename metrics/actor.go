@@ -34,6 +34,11 @@ type ActorBehavior interface {
 
 type messageCollectMetrics struct{}
 
+// Registry returns the prometheus registry for registering custom metrics
+func (a *Actor) Registry() *prometheus.Registry {
+	return a.registry
+}
+
 // Actor implements gen.ProcessBehavior
 type Actor struct {
 	gen.Process
@@ -553,8 +558,3 @@ func (a *Actor) CollectMetrics() error {
 
 // Terminate
 func (a *Actor) Terminate(reason error) {}
-
-// Registry returns the prometheus registry for registering custom metrics
-func (a *Actor) Registry() *prometheus.Registry {
-	return a.registry
-}
