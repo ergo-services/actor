@@ -482,7 +482,17 @@ func (a *Actor) ProcessTerminate(reason error) {
 
 // Init
 func (a *Actor) Init(args ...any) (Options, error) {
-	return Options{}, nil
+	if len(args) == 0 {
+		return Options{}, nil
+	}
+
+	options, ok := args[0].(Options)
+	if ok == false {
+		err := fmt.Errorf("%w: use %T", gen.ErrIncorrect, Options{})
+		return Options{}, err
+	}
+
+	return options, nil
 }
 
 // HandleMessage
