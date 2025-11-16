@@ -6,6 +6,6 @@
 
 Extra library of actors for the Ergo Framework 3.0 (and above)
 
-# metrics
+## metrics
 
 A Prometheus metrics exporter actor that automatically collects and exposes node and network metrics via HTTP endpoint.
