@@ -42,6 +42,7 @@ type Actor struct {
 	isLeader           bool
 	leader             gen.PID
 	peers              map[gen.PID]bool
+	votesReceived      map[gen.PID]bool
 
 	electionTimer  gen.CancelFunc
 	heartbeatTimer gen.CancelFunc
@@ -64,8 +65,9 @@ type msgVote struct {
 }
 
 type msgVoteReply struct {
-	Term    uint64
-	Granted bool
+	ClusterID string
+	Term      uint64
+	Granted   bool
 }
 
 type msgHeartbeat struct {
@@ -104,27 +106,45 @@ func (l *Actor) ProcessInit(process gen.Process, args ...any) (rr error) {
 		return err
 	}
 
+	// Validate options
+	if opts.ClusterID == "" {
+		return fmt.Errorf("ClusterID cannot be empty")
+	}
+
 	l.clusterID = opts.ClusterID
 	l.bootstrap = opts.Bootstrap
 
 	l.electionTimeoutMin = opts.ElectionTimeoutMin
-	if l.electionTimeoutMin == 0 {
+	if l.electionTimeoutMin <= 0 {
 		l.electionTimeoutMin = 150
 	}
 
 	l.electionTimeoutMax = opts.ElectionTimeoutMax
-	if l.electionTimeoutMax == 0 {
+	if l.electionTimeoutMax <= 0 {
 		l.electionTimeoutMax = 300
 	}
 
+	if l.electionTimeoutMax <= l.electionTimeoutMin {
+		return fmt.Errorf("ElectionTimeoutMax (%d) must be greater than ElectionTimeoutMin (%d)",
+			l.electionTimeoutMax, l.electionTimeoutMin)
+	}
+
 	l.heartbeatInterval = opts.HeartbeatInterval
-	if l.heartbeatInterval == 0 {
+	if l.heartbeatInterval <= 0 {
 		l.heartbeatInterval = 50
+	}
+
+	if l.heartbeatInterval >= l.electionTimeoutMin {
+		l.Log().Warning("HeartbeatInterval (%dms) >= ElectionTimeoutMin (%dms) - elections may be unstable",
+			l.heartbeatInterval, l.electionTimeoutMin)
 	}
 
 	l.peers = make(map[gen.PID]bool)
 
 	l.resetElectionTimer()
+
+	// Call initial follower callback
+	l.behavior.HandleBecomeFollower(gen.PID{})
 
 	return nil
 }
@@ -238,8 +258,10 @@ func (l *Actor) handleMessage(from gen.PID, message any) error {
 		}
 
 	case msgVoteReply:
-		l.discoverPeer(from)
-		return l.handleVoteReply(from, msg)
+		if msg.ClusterID == l.clusterID {
+			l.discoverPeer(from)
+			return l.handleVoteReply(from, msg)
+		}
 
 	case msgHeartbeat:
 		if msg.ClusterID == l.clusterID {
@@ -322,6 +344,7 @@ func (l *Actor) becomeFollower() {
 	l.isLeader = false
 	l.votedFor = gen.PID{}
 	l.leader = gen.PID{}
+	l.votesReceived = nil
 
 	if wasLeader {
 		l.behavior.HandleBecomeFollower(gen.PID{})
@@ -335,8 +358,9 @@ func (l *Actor) becomeCandidate() {
 	l.term++
 	l.votedFor = l.PID()
 	l.isLeader = false
+	l.votesReceived = make(map[gen.PID]bool)
 
-	votes := 1
+	votes := 1 // vote for self
 	quorum := len(l.peers)/2 + 1
 
 	l.Log().Info("election: term=%d peers=%d quorum=%d", l.term, len(l.peers), quorum)
@@ -358,6 +382,7 @@ func (l *Actor) becomeCandidate() {
 		l.Send(b, vote)
 	}
 
+	// Only become leader immediately if we're the only node (no peers)
 	if votes >= quorum {
 		l.becomeLeader()
 	}
@@ -394,7 +419,7 @@ func (l *Actor) handleVote(from gen.PID, msg msgVote) error {
 		l.resetElectionTimer()
 	}
 
-	l.Send(from, msgVoteReply{Term: l.term, Granted: granted})
+	l.Send(from, msgVoteReply{ClusterID: l.clusterID, Term: l.term, Granted: granted})
 	return nil
 }
 
@@ -405,12 +430,21 @@ func (l *Actor) handleVoteReply(from gen.PID, msg msgVoteReply) error {
 		return nil
 	}
 
+	// Only process vote replies if we're still a candidate for this term
 	if msg.Term == l.term && msg.Granted && l.isLeader == false && l.votedFor == l.PID() {
-		votes := 1
-		for range l.peers {
-			votes++
+		// Track this vote
+		l.votesReceived[from] = true
+
+		// Count actual votes received
+		votes := 1 // vote for self
+		for _, granted := range l.votesReceived {
+			if granted {
+				votes++
+			}
 		}
-		if votes >= len(l.peers)/2+1 {
+
+		quorum := len(l.peers)/2 + 1
+		if votes >= quorum {
 			l.becomeLeader()
 		}
 	}
@@ -425,6 +459,13 @@ func (l *Actor) handleHeartbeat(from gen.PID, msg msgHeartbeat) error {
 
 	if msg.Term > l.term {
 		l.term = msg.Term
+		l.becomeFollower()
+	}
+
+	// If we receive heartbeat in same term while being leader
+	// This indicates split-brain - step down to be safe
+	if msg.Term == l.term && l.isLeader {
+		l.Log().Warning("received heartbeat from %s claiming leadership in same term %d - stepping down", from, msg.Term)
 		l.becomeFollower()
 	}
 
@@ -472,7 +513,12 @@ func (l *Actor) sendHeartbeat() {
 }
 
 func (l *Actor) randomElectionTimeout() time.Duration {
-	timeout := l.electionTimeoutMin + rand.Intn(l.electionTimeoutMax-l.electionTimeoutMin)
+	diff := l.electionTimeoutMax - l.electionTimeoutMin
+	if diff <= 0 {
+		// Should never happen due to validation, but be defensive
+		return time.Duration(l.electionTimeoutMin) * time.Millisecond
+	}
+	timeout := l.electionTimeoutMin + rand.Intn(diff)
 	return time.Duration(timeout) * time.Millisecond
 }
 
