@@ -12,29 +12,26 @@ import (
 	"ergo.services/ergo/lib"
 )
 
-// ActorBehavior interface - EXACTLY like act.ActorBehavior but returns Options
 type ActorBehavior interface {
 	gen.ProcessBehavior
 
-	Init(args ...any) (Options, error) // Returns Options!
+	Init(args ...any) (Options, error)
 	HandleMessage(from gen.PID, message any) error
 	HandleCall(from gen.PID, ref gen.Ref, request any) (any, error)
 	Terminate(reason error)
 	HandleInspect(from gen.PID, item ...string) map[string]string
 
-	// Leader-specific callbacks
 	HandleBecomeLeader()
 	HandleBecomeFollower(leader gen.PID)
 }
 
-// Actor - EXACTLY like act.Actor pattern
 type Actor struct {
 	gen.Process
 
 	behavior ActorBehavior
 	mailbox  gen.ProcessMailbox
 
-	// Leader election state
+	// leader election state
 	clusterID          string
 	bootstrap          []gen.ProcessID
 	electionTimeoutMin int
@@ -60,7 +57,6 @@ type Options struct {
 	HeartbeatInterval  int // Heartbeat interval (ms, default: 50)
 }
 
-// Messages
 type msgVote struct {
 	ClusterID string
 	Term      uint64
@@ -81,7 +77,6 @@ type msgHeartbeat struct {
 type msgElectionTimeout struct{}
 type msgHeartbeatTimeout struct{}
 
-// ProcessInit - EXACTLY like act.Actor
 func (l *Actor) ProcessInit(process gen.Process, args ...any) (rr error) {
 	var ok bool
 
@@ -112,7 +107,6 @@ func (l *Actor) ProcessInit(process gen.Process, args ...any) (rr error) {
 	l.clusterID = opts.ClusterID
 	l.bootstrap = opts.Bootstrap
 
-	// Set timeouts with defaults
 	l.electionTimeoutMin = opts.ElectionTimeoutMin
 	if l.electionTimeoutMin == 0 {
 		l.electionTimeoutMin = 150
@@ -135,7 +129,6 @@ func (l *Actor) ProcessInit(process gen.Process, args ...any) (rr error) {
 	return nil
 }
 
-// ProcessRun - EXACTLY like act.Actor
 func (l *Actor) ProcessRun() (rr error) {
 	var message *gen.MailboxMessage
 
@@ -229,7 +222,6 @@ func (l *Actor) ProcessTerminate(reason error) {
 	l.behavior.Terminate(reason)
 }
 
-// handleMessage dispatches leader election messages
 func (l *Actor) handleMessage(from gen.PID, message any) error {
 	switch msg := message.(type) {
 	case gen.MessageDownPID:
@@ -241,7 +233,7 @@ func (l *Actor) handleMessage(from gen.PID, message any) error {
 
 	case msgVote:
 		if msg.ClusterID == l.clusterID {
-			l.discoverPeer(from) // Only discover if ClusterID matches
+			l.discoverPeer(from)
 			return l.handleVote(from, msg)
 		}
 
@@ -251,7 +243,7 @@ func (l *Actor) handleMessage(from gen.PID, message any) error {
 
 	case msgHeartbeat:
 		if msg.ClusterID == l.clusterID {
-			l.discoverPeer(from) // Only discover if ClusterID matches
+			l.discoverPeer(from) // only discover if ClusterID matches
 			return l.handleHeartbeat(from, msg)
 		}
 
@@ -292,9 +284,7 @@ func (l *Actor) HandleCall(from gen.PID, ref gen.Ref, request any) (any, error) 
 	return nil, nil
 }
 
-func (l *Actor) Terminate(reason error) {
-	// Default: no-op
-}
+func (l *Actor) Terminate(reason error) {}
 
 func (l *Actor) HandleInspect(from gen.PID, item ...string) map[string]string {
 	return map[string]string{
@@ -304,16 +294,6 @@ func (l *Actor) HandleInspect(from gen.PID, item ...string) map[string]string {
 		"peers":   fmt.Sprintf("%d", len(l.peers)),
 	}
 }
-
-func (l *Actor) HandleBecomeLeader() {
-	// Default: no-op
-}
-
-func (l *Actor) HandleBecomeFollower(leader gen.PID) {
-	// Default: no-op
-}
-
-// Public API
 
 // IsLeader returns true if this node is the leader
 func (l *Actor) IsLeader() bool {
@@ -335,7 +315,8 @@ func (l *Actor) Join(peer gen.ProcessID) {
 	})
 }
 
-// Election logic
+// election logic
+
 func (l *Actor) becomeFollower() {
 	wasLeader := l.isLeader
 	l.isLeader = false
@@ -447,7 +428,6 @@ func (l *Actor) handleHeartbeat(from gen.PID, msg msgHeartbeat) error {
 		l.becomeFollower()
 	}
 
-	// Only call callback if leader changed
 	if l.leader != msg.Leader {
 		l.leader = msg.Leader
 		l.behavior.HandleBecomeFollower(l.leader)
