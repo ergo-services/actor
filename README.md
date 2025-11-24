@@ -6,6 +6,29 @@
 
 Extra library of actors for the Ergo Framework 3.0 (and above)
 
+## leader
+
+Distributed leader election actor implementing Raft-inspired consensus algorithm. Provides coordination primitives for building systems that require single leader selection across a cluster - task schedulers, resource managers, single-writer databases, distributed locks.
+
+**Features:**
+- Raft-style leader election with term-based disambiguation
+- Automatic failover on leader failure
+- Network partition safety (split-brain prevention through majority quorum)
+- Dynamic peer discovery
+- No external dependencies
+
+See [documentation](https://devel.docs.ergo.services/extra-library/actors/leader) for details.
+
 ## metrics
 
-A Prometheus metrics exporter actor that automatically collects and exposes node and network metrics via HTTP endpoint.
+Prometheus metrics exporter actor that automatically collects and exposes Ergo node and network telemetry via HTTP endpoint. Provides observability for monitoring cluster health, resource usage, and inter-node communication patterns.
+
+**Features:**
+- Automatic collection of node metrics (uptime, processes, memory, CPU)
+- Network metrics per remote node (messages, bytes transferred, connection uptime)
+- HTTP endpoint exposing metrics in Prometheus format
+- Extensible - embed `metrics.Actor` to add custom application metrics
+- Configurable collection interval
+- Observer UI integration for real-time inspection
+
+See [documentation](https://devel.docs.ergo.services/extra-library/actors/metrics) for details.
