@@ -7,7 +7,6 @@ import (
 	"ergo.services/ergo/testing/unit"
 )
 
-// Test implementation of ActorBehavior
 type TestLeader struct {
 	Actor
 
