@@ -21,8 +21,16 @@ type ActorBehavior interface {
 	Terminate(reason error)
 	HandleInspect(from gen.PID, item ...string) map[string]string
 
-	HandleBecomeLeader()
-	HandleBecomeFollower(leader gen.PID)
+	// Leadership callbacks
+	HandleBecomeLeader() error
+	HandleBecomeFollower(leader gen.PID) error
+
+	// Peer management callbacks
+	HandlePeerJoined(peer gen.PID) error
+	HandlePeerLeft(peer gen.PID) error
+
+	// Term management callback
+	HandleTermChanged(oldTerm, newTerm uint64) error
 }
 
 type Actor struct {
@@ -115,23 +123,23 @@ func (l *Actor) ProcessInit(process gen.Process, args ...any) (rr error) {
 	l.bootstrap = opts.Bootstrap
 
 	l.electionTimeoutMin = opts.ElectionTimeoutMin
-	if l.electionTimeoutMin <= 0 {
+	if l.electionTimeoutMin < 1 {
 		l.electionTimeoutMin = 150
 	}
 
 	l.electionTimeoutMax = opts.ElectionTimeoutMax
-	if l.electionTimeoutMax <= 0 {
+	if l.electionTimeoutMax < 1 {
 		l.electionTimeoutMax = 300
+	}
+
+	l.heartbeatInterval = opts.HeartbeatInterval
+	if l.heartbeatInterval < 1 {
+		l.heartbeatInterval = 50
 	}
 
 	if l.electionTimeoutMax <= l.electionTimeoutMin {
 		return fmt.Errorf("ElectionTimeoutMax (%d) must be greater than ElectionTimeoutMin (%d)",
 			l.electionTimeoutMax, l.electionTimeoutMin)
-	}
-
-	l.heartbeatInterval = opts.HeartbeatInterval
-	if l.heartbeatInterval <= 0 {
-		l.heartbeatInterval = 50
 	}
 
 	if l.heartbeatInterval >= l.electionTimeoutMin {
@@ -142,9 +150,6 @@ func (l *Actor) ProcessInit(process gen.Process, args ...any) (rr error) {
 	l.peers = make(map[gen.PID]bool)
 
 	l.resetElectionTimer()
-
-	// Call initial follower callback
-	l.behavior.HandleBecomeFollower(gen.PID{})
 
 	return nil
 }
@@ -245,27 +250,38 @@ func (l *Actor) ProcessTerminate(reason error) {
 func (l *Actor) handleMessage(from gen.PID, message any) error {
 	switch msg := message.(type) {
 	case gen.MessageDownPID:
-		delete(l.peers, msg.PID)
+		if l.peers[msg.PID] {
+			delete(l.peers, msg.PID)
+			if err := l.behavior.HandlePeerLeft(msg.PID); err != nil {
+				return err
+			}
+		}
 		if l.leader == msg.PID {
 			l.Log().Info("leader down")
-			l.becomeFollower()
+			return l.becomeFollower()
 		}
 
 	case msgVote:
 		if msg.ClusterID == l.clusterID {
-			l.discoverPeer(from)
+			if err := l.discoverPeer(from); err != nil {
+				return err
+			}
 			return l.handleVote(from, msg)
 		}
 
 	case msgVoteReply:
 		if msg.ClusterID == l.clusterID {
-			l.discoverPeer(from)
+			if err := l.discoverPeer(from); err != nil {
+				return err
+			}
 			return l.handleVoteReply(from, msg)
 		}
 
 	case msgHeartbeat:
 		if msg.ClusterID == l.clusterID {
-			l.discoverPeer(from) // only discover if ClusterID matches
+			if err := l.discoverPeer(from); err != nil {
+				return err
+			}
 			return l.handleHeartbeat(from, msg)
 		}
 
@@ -282,17 +298,21 @@ func (l *Actor) handleMessage(from gen.PID, message any) error {
 	return nil
 }
 
-func (l *Actor) discoverPeer(pid gen.PID) {
+func (l *Actor) discoverPeer(pid gen.PID) error {
 	if pid == l.PID() {
-		return
+		return nil
 	}
 
 	if _, exists := l.peers[pid]; exists {
-		return
+		return nil
 	}
 
 	l.peers[pid] = true
 	l.Monitor(pid)
+	if err := l.behavior.HandlePeerJoined(pid); err != nil {
+		return fmt.Errorf("HandlePeerJoined: %w", err)
+	}
+	return nil
 }
 
 // Default implementations
@@ -317,6 +337,12 @@ func (l *Actor) HandleInspect(from gen.PID, item ...string) map[string]string {
 	}
 }
 
+func (l *Actor) HandlePeerJoined(peer gen.PID) error             { return nil }
+func (l *Actor) HandlePeerLeft(peer gen.PID) error               { return nil }
+func (l *Actor) HandleTermChanged(oldTerm, newTerm uint64) error { return nil }
+
+// Public API for embedding
+
 // IsLeader returns true if this node is the leader
 func (l *Actor) IsLeader() bool {
 	return l.isLeader
@@ -325,6 +351,57 @@ func (l *Actor) IsLeader() bool {
 // Leader returns the current leader PID (empty if no leader)
 func (l *Actor) Leader() gen.PID {
 	return l.leader
+}
+
+// Term returns the current election term
+func (l *Actor) Term() uint64 {
+	return l.term
+}
+
+// Peers returns a snapshot of current peer list
+func (l *Actor) Peers() []gen.PID {
+	peers := make([]gen.PID, 0, len(l.peers))
+	for pid := range l.peers {
+		peers = append(peers, pid)
+	}
+	return peers
+}
+
+// PeerCount returns the number of known peers
+func (l *Actor) PeerCount() int {
+	return len(l.peers)
+}
+
+// ClusterID returns the cluster identifier
+func (l *Actor) ClusterID() string {
+	return l.clusterID
+}
+
+// Bootstrap returns the bootstrap peer list
+func (l *Actor) Bootstrap() []gen.ProcessID {
+	return l.bootstrap
+}
+
+// HasPeer checks if a PID is a known peer
+func (l *Actor) HasPeer(pid gen.PID) bool {
+	return l.peers[pid]
+}
+
+// Broadcast sends a message to all known peers
+func (l *Actor) Broadcast(message any) {
+	for pid := range l.peers {
+		l.Send(pid, message)
+	}
+}
+
+// BroadcastBootstrap sends a message to all bootstrap peers (excluding self)
+func (l *Actor) BroadcastBootstrap(message any) {
+	for _, procID := range l.bootstrap {
+		if procID.Name == l.Name() && procID.Node == l.Node().Name() {
+			continue
+		}
+		l.Send(procID, message)
+	}
 }
 
 // Join adds a peer to the cluster
@@ -339,7 +416,7 @@ func (l *Actor) Join(peer gen.ProcessID) {
 
 // election logic
 
-func (l *Actor) becomeFollower() {
+func (l *Actor) becomeFollower() error {
 	wasLeader := l.isLeader
 	l.isLeader = false
 	l.votedFor = gen.PID{}
@@ -347,14 +424,17 @@ func (l *Actor) becomeFollower() {
 	l.votesReceived = nil
 
 	if wasLeader {
-		l.behavior.HandleBecomeFollower(gen.PID{})
+		if err := l.behavior.HandleBecomeFollower(gen.PID{}); err != nil {
+			return fmt.Errorf("HandleBecomeFollower: %w", err)
+		}
 	}
 
 	l.cancelHeartbeatTimer()
 	l.resetElectionTimer()
+	return nil
 }
 
-func (l *Actor) becomeCandidate() {
+func (l *Actor) becomeCandidate() error {
 	l.term++
 	l.votedFor = l.PID()
 	l.isLeader = false
@@ -384,11 +464,14 @@ func (l *Actor) becomeCandidate() {
 
 	// Only become leader immediately if we're the only node (no peers)
 	if votes >= quorum {
-		l.becomeLeader()
+		if err := l.becomeLeader(); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func (l *Actor) becomeLeader() {
+func (l *Actor) becomeLeader() error {
 	l.isLeader = true
 	l.leader = l.PID()
 
@@ -396,9 +479,14 @@ func (l *Actor) becomeLeader() {
 	l.resetHeartbeatTimer()
 
 	l.Log().Info("became leader: term=%d", l.term)
-	l.behavior.HandleBecomeLeader()
+	if err := l.behavior.HandleBecomeLeader(); err != nil {
+		// Step down on critical callback failure
+		l.becomeFollower()
+		return fmt.Errorf("HandleBecomeLeader: %w", err)
+	}
 
 	l.sendHeartbeat()
+	return nil
 }
 
 func (l *Actor) handleVote(from gen.PID, msg msgVote) error {
@@ -408,8 +496,12 @@ func (l *Actor) handleVote(from gen.PID, msg msgVote) error {
 	}
 
 	if msg.Term > l.term {
-		l.term = msg.Term
-		l.becomeFollower()
+		if err := l.setTerm(msg.Term); err != nil {
+			return err
+		}
+		if err := l.becomeFollower(); err != nil {
+			return err
+		}
 	}
 
 	granted := false
@@ -425,8 +517,12 @@ func (l *Actor) handleVote(from gen.PID, msg msgVote) error {
 
 func (l *Actor) handleVoteReply(from gen.PID, msg msgVoteReply) error {
 	if msg.Term > l.term {
-		l.term = msg.Term
-		l.becomeFollower()
+		if err := l.setTerm(msg.Term); err != nil {
+			return err
+		}
+		if err := l.becomeFollower(); err != nil {
+			return err
+		}
 		return nil
 	}
 
@@ -445,7 +541,9 @@ func (l *Actor) handleVoteReply(from gen.PID, msg msgVoteReply) error {
 
 		quorum := len(l.peers)/2 + 1
 		if votes >= quorum {
-			l.becomeLeader()
+			if err := l.becomeLeader(); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -458,20 +556,29 @@ func (l *Actor) handleHeartbeat(from gen.PID, msg msgHeartbeat) error {
 	}
 
 	if msg.Term > l.term {
-		l.term = msg.Term
-		l.becomeFollower()
+		if err := l.setTerm(msg.Term); err != nil {
+			return err
+		}
+		if err := l.becomeFollower(); err != nil {
+			return err
+		}
 	}
 
 	// If we receive heartbeat in same term while being leader
 	// This indicates split-brain - step down to be safe
 	if msg.Term == l.term && l.isLeader {
-		l.Log().Warning("received heartbeat from %s claiming leadership in same term %d - stepping down", from, msg.Term)
-		l.becomeFollower()
+		l.Log().
+			Warning("received heartbeat from %s claiming leadership in same term %d - stepping down", from, msg.Term)
+		if err := l.becomeFollower(); err != nil {
+			return err
+		}
 	}
 
 	if l.leader != msg.Leader {
 		l.leader = msg.Leader
-		l.behavior.HandleBecomeFollower(l.leader)
+		if err := l.behavior.HandleBecomeFollower(l.leader); err != nil {
+			return fmt.Errorf("HandleBecomeFollower: %w", err)
+		}
 	}
 
 	l.resetElectionTimer()
@@ -480,7 +587,9 @@ func (l *Actor) handleHeartbeat(from gen.PID, msg msgHeartbeat) error {
 
 func (l *Actor) handleElectionTimeout() error {
 	if l.isLeader == false {
-		l.becomeCandidate()
+		if err := l.becomeCandidate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -545,4 +654,22 @@ func (l *Actor) cancelHeartbeatTimer() {
 		l.heartbeatTimer()
 		l.heartbeatTimer = nil
 	}
+}
+
+// setTerm updates the term and notifies the behavior
+func (l *Actor) setTerm(newTerm uint64) error {
+	if newTerm == l.term {
+		return nil
+	}
+
+	oldTerm := l.term
+	l.term = newTerm
+
+	// Notify behavior of term change (skip initial term 0)
+	if oldTerm > 0 {
+		if err := l.behavior.HandleTermChanged(oldTerm, newTerm); err != nil {
+			return fmt.Errorf("HandleTermChanged: %w", err)
+		}
+	}
+	return nil
 }

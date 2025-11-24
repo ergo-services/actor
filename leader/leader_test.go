@@ -11,17 +11,17 @@ import (
 type TestLeader struct {
 	Actor
 
-	becameLeaderCalled    bool
-	becameFollowerCalled  bool
-	becameFollowerLeader  gen.PID
-	terminateCalled       bool
-	terminateReason       error
-	initError             error
-	clusterID             string
-	bootstrap             []gen.ProcessID
-	electionTimeoutMin    int
-	electionTimeoutMax    int
-	heartbeatInterval     int
+	becameLeaderCalled   bool
+	becameFollowerCalled bool
+	becameFollowerLeader gen.PID
+	terminateCalled      bool
+	terminateReason      error
+	initError            error
+	clusterID            string
+	bootstrap            []gen.ProcessID
+	electionTimeoutMin   int
+	electionTimeoutMax   int
+	heartbeatInterval    int
 }
 
 func (t *TestLeader) Init(args ...any) (Options, error) {
@@ -47,13 +47,15 @@ func (t *TestLeader) Init(args ...any) (Options, error) {
 	return opts, nil
 }
 
-func (t *TestLeader) HandleBecomeLeader() {
+func (t *TestLeader) HandleBecomeLeader() error {
 	t.becameLeaderCalled = true
+	return nil
 }
 
-func (t *TestLeader) HandleBecomeFollower(leader gen.PID) {
+func (t *TestLeader) HandleBecomeFollower(leader gen.PID) error {
 	t.becameFollowerCalled = true
 	t.becameFollowerLeader = leader
+	return nil
 }
 
 func (t *TestLeader) Terminate(reason error) {
@@ -82,6 +84,256 @@ func factoryTestLeader(clusterID string, bootstrap []gen.ProcessID) gen.ProcessF
 	}
 }
 
+// Test actor API
+
+func TestAPI_Accessors(t *testing.T) {
+	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
+		unit.WithArgs("test-cluster", []gen.ProcessID{}))
+
+	behavior := actor.Behavior().(*TestLeader)
+
+	// Test Term()
+	unit.Equal(t, uint64(0), behavior.Term(), "Initial term should be 0")
+
+	// Test ClusterID()
+	unit.Equal(t, "test-cluster", behavior.ClusterID(), "ClusterID should match")
+
+	// Test PeerCount()
+	unit.Equal(t, 0, behavior.PeerCount(), "Should have 0 peers initially")
+
+	// Test Peers()
+	peers := behavior.Peers()
+	unit.Equal(t, 0, len(peers), "Peers() should return empty slice")
+
+	// Test Bootstrap()
+	bootstrap := behavior.Bootstrap()
+	unit.NotNil(t, bootstrap, "Bootstrap should not be nil")
+	unit.Equal(t, 0, len(bootstrap), "Bootstrap should be empty")
+
+	// Test IsLeader() and Leader()
+	unit.False(t, behavior.IsLeader(), "Should not be leader initially")
+	unit.Equal(t, gen.PID{}, behavior.Leader(), "Leader should be empty initially")
+}
+
+func TestAPI_PeersAccessor(t *testing.T) {
+	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
+		unit.WithArgs("test-cluster", []gen.ProcessID{}))
+
+	behavior := actor.Behavior().(*TestLeader)
+
+	// Discover some peers
+	peer1 := gen.PID{Node: "peer1@host", ID: 100, Creation: 1}
+	peer2 := gen.PID{Node: "peer2@host", ID: 200, Creation: 1}
+
+	actor.SendMessage(peer1, msgVote{
+		ClusterID: "test-cluster",
+		Term:      1,
+		Candidate: peer1,
+	})
+
+	actor.SendMessage(peer2, msgVote{
+		ClusterID: "test-cluster",
+		Term:      1,
+		Candidate: peer2,
+	})
+
+	// Test PeerCount()
+	unit.Equal(t, 2, behavior.PeerCount(), "Should have 2 peers")
+
+	// Test Peers()
+	peers := behavior.Peers()
+	unit.Equal(t, 2, len(peers), "Peers() should return 2 peers")
+
+	// Test HasPeer()
+	unit.True(t, behavior.HasPeer(peer1), "Should have peer1")
+	unit.True(t, behavior.HasPeer(peer2), "Should have peer2")
+	unit.False(t, behavior.HasPeer(gen.PID{Node: "unknown@host", ID: 999, Creation: 1}), "Should not have unknown peer")
+}
+
+func TestAPI_Broadcast(t *testing.T) {
+	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
+		unit.WithArgs("test-cluster", []gen.ProcessID{}))
+
+	behavior := actor.Behavior().(*TestLeader)
+
+	// Add some peers
+	peer1 := gen.PID{Node: "peer1@host", ID: 100, Creation: 1}
+	peer2 := gen.PID{Node: "peer2@host", ID: 200, Creation: 1}
+	behavior.Actor.peers[peer1] = true
+	behavior.Actor.peers[peer2] = true
+
+	actor.ClearEvents()
+
+	// Test Broadcast()
+	testMsg := "test-broadcast"
+	behavior.Broadcast(testMsg)
+
+	// Check that message was sent to all peers
+	events := actor.Events()
+	sentTo := make(map[gen.PID]bool)
+
+	for _, e := range events {
+		if se, ok := e.(unit.SendEvent); ok {
+			if se.Message == testMsg {
+				if pid, ok := se.To.(gen.PID); ok {
+					sentTo[pid] = true
+				}
+			}
+		}
+	}
+
+	unit.Equal(t, 2, len(sentTo), "Should send to 2 peers")
+	unit.True(t, sentTo[peer1], "Should send to peer1")
+	unit.True(t, sentTo[peer2], "Should send to peer2")
+}
+
+func TestAPI_BroadcastBootstrap(t *testing.T) {
+	bootstrap := []gen.ProcessID{
+		{Name: "leader", Node: "node1@host"},
+		{Name: "leader", Node: "node2@host"},
+		{Name: "leader", Node: "node3@host"},
+	}
+
+	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", bootstrap),
+		unit.WithArgs("test-cluster", bootstrap),
+		unit.WithNodeName("node1@host"),
+		unit.WithRegister("leader"))
+
+	behavior := actor.Behavior().(*TestLeader)
+
+	actor.ClearEvents()
+
+	// Test BroadcastBootstrap()
+	testMsg := "bootstrap-broadcast"
+	behavior.BroadcastBootstrap(testMsg)
+
+	// Check that messages were sent to bootstrap peers (excluding self)
+	events := actor.Events()
+	messageCount := 0
+
+	for _, e := range events {
+		if se, ok := e.(unit.SendEvent); ok {
+			if se.Message == testMsg {
+				if procID, ok := se.To.(gen.ProcessID); ok {
+					// Should not be self
+					unit.NotEqual(t, "node1@host", procID.Node.String(), "Should not send to self")
+					messageCount++
+				}
+			}
+		}
+	}
+
+	// Should send to 2 bootstrap peers (node2 and node3, excluding self node1)
+	unit.Equal(t, 2, messageCount, "Should send to 2 bootstrap peers (excluding self)")
+}
+
+func TestAPI_CallbackPeerJoined(t *testing.T) {
+	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
+		unit.WithArgs("test-cluster", []gen.ProcessID{}))
+
+	behavior := actor.Behavior().(*TestLeader)
+
+	peer1 := gen.PID{Node: "peer1@host", ID: 100, Creation: 1}
+	peer2 := gen.PID{Node: "peer2@host", ID: 200, Creation: 1}
+
+	// Discover peer1
+	actor.SendMessage(peer1, msgVote{
+		ClusterID: "test-cluster",
+		Term:      1,
+		Candidate: peer1,
+	})
+
+	// Verify peer was added (indirect test via PeerCount)
+	unit.Equal(t, 1, behavior.PeerCount(), "Should have 1 peer after discovery")
+	unit.True(t, behavior.HasPeer(peer1), "Should have peer1")
+
+	// Discover peer2
+	actor.SendMessage(peer2, msgVote{
+		ClusterID: "test-cluster",
+		Term:      1,
+		Candidate: peer2,
+	})
+
+	// Verify second peer was added
+	unit.Equal(t, 2, behavior.PeerCount(), "Should have 2 peers after discovery")
+	unit.True(t, behavior.HasPeer(peer2), "Should have peer2")
+}
+
+func TestAPI_CallbackPeerLeft(t *testing.T) {
+	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
+		unit.WithArgs("test-cluster", []gen.ProcessID{}))
+
+	behavior := actor.Behavior().(*TestLeader)
+
+	peer1 := gen.PID{Node: "peer1@host", ID: 100, Creation: 1}
+
+	// Discover peer
+	actor.SendMessage(peer1, msgVote{
+		ClusterID: "test-cluster",
+		Term:      1,
+		Candidate: peer1,
+	})
+
+	unit.Equal(t, 1, behavior.PeerCount(), "Should have 1 peer")
+
+	// Simulate peer going down
+	actor.SendMessage(actor.PID(), gen.MessageDownPID{
+		PID:    peer1,
+		Reason: gen.TerminateReasonNormal,
+	})
+
+	// Verify peer was removed
+	unit.Equal(t, 0, behavior.PeerCount(), "Should have 0 peers after removal")
+	unit.False(t, behavior.HasPeer(peer1), "Should not have peer1 anymore")
+}
+
+func TestAPI_CallbackTermChanged(t *testing.T) {
+	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
+		unit.WithArgs("test-cluster", []gen.ProcessID{}))
+
+	behavior := actor.Behavior().(*TestLeader)
+
+	remotePeer := gen.PID{Node: "remote@host", ID: 100, Creation: 1}
+
+	// Initial term is 0
+	unit.Equal(t, uint64(0), behavior.Term(), "Initial term should be 0")
+
+	// Receive vote request with higher term
+	actor.SendMessage(remotePeer, msgVote{
+		ClusterID: "test-cluster",
+		Term:      5,
+		Candidate: remotePeer,
+	})
+
+	// Verify term changed
+	unit.Equal(t, uint64(5), behavior.Term(), "Term should be updated to 5")
+
+	// Change to term 10
+	actor.SendMessage(remotePeer, msgVote{
+		ClusterID: "test-cluster",
+		Term:      10,
+		Candidate: remotePeer,
+	})
+
+	// Verify term changed again
+	unit.Equal(t, uint64(10), behavior.Term(), "Term should be updated to 10")
+}
+
+func TestAPI_TermAccessorDuringElection(t *testing.T) {
+	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
+		unit.WithArgs("test-cluster", []gen.ProcessID{}))
+
+	behavior := actor.Behavior().(*TestLeader)
+
+	initialTerm := behavior.Term()
+
+	// Trigger election
+	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+
+	// Term should increment
+	unit.Equal(t, initialTerm+1, behavior.Term(), "Term should increment during election")
+}
+
 // Test: Initialization with valid options
 func TestLeaderInit_ValidOptions(t *testing.T) {
 	clusterID := "test-cluster"
@@ -93,10 +345,14 @@ func TestLeaderInit_ValidOptions(t *testing.T) {
 	unit.Nil(t, err, "Should initialize successfully")
 	unit.NotNil(t, actor, "Actor should not be nil")
 
-	// Verify initial follower callback was called
+	// Follower is the initial state - no callback should be called on init
 	behavior := actor.Behavior().(*TestLeader)
-	unit.True(t, behavior.becameFollowerCalled, "HandleBecomeFollower should be called on init")
-	unit.Equal(t, gen.PID{}, behavior.becameFollowerLeader, "Initial leader should be empty")
+	unit.False(
+		t,
+		behavior.becameFollowerCalled,
+		"HandleBecomeFollower should not be called on init (follower is default state)",
+	)
+	unit.False(t, behavior.becameLeaderCalled, "HandleBecomeLeader should not be called on init")
 }
 
 // Test: Initialization fails with empty ClusterID
@@ -1500,7 +1756,7 @@ func TestLeaderElection_HeartbeatToAllPeers(t *testing.T) {
 
 	// Should send to discovered peers and bootstrap peer
 	events := actor.Events()
-	
+
 	// Count heartbeats (allow duplicates for now - that's a known inefficiency, not a bug)
 	discoveredHeartbeats := 0
 	bootstrapHeartbeats := 0
@@ -1751,7 +2007,7 @@ func TestLeaderElection_HeartbeatResetsElectionTimer(t *testing.T) {
 	unit.True(t, foundTimerReset, "Should reset election timer via SendAfter")
 }
 
-// Test: Candidate becomes follower on heartbeat  
+// Test: Candidate becomes follower on heartbeat
 func TestLeaderElection_CandidateStepsDownOnHigherTermHeartbeat(t *testing.T) {
 	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
 		unit.WithArgs("test-cluster", []gen.ProcessID{}))
