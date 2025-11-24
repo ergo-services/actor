@@ -250,7 +250,7 @@ func (l *Actor) ProcessTerminate(reason error) {
 func (l *Actor) handleMessage(from gen.PID, message any) error {
 	switch msg := message.(type) {
 	case gen.MessageDownPID:
-		if l.peers[msg.PID] {
+		if l.peers[msg.PID] == true {
 			delete(l.peers, msg.PID)
 			if err := l.behavior.HandlePeerLeft(msg.PID); err != nil {
 				return err
@@ -309,39 +309,8 @@ func (l *Actor) discoverPeer(pid gen.PID) error {
 
 	l.peers[pid] = true
 	l.Monitor(pid)
-	if err := l.behavior.HandlePeerJoined(pid); err != nil {
-		return fmt.Errorf("HandlePeerJoined: %w", err)
-	}
-	return nil
+	return l.behavior.HandlePeerJoined(pid)
 }
-
-// Default implementations
-func (l *Actor) HandleMessage(from gen.PID, message any) error {
-	l.Log().Warning("Leader.HandleMessage: unhandled message from %s: %T", from, message)
-	return nil
-}
-
-func (l *Actor) HandleCall(from gen.PID, ref gen.Ref, request any) (any, error) {
-	l.Log().Warning("Leader.HandleCall: unhandled request from %s: %T", from, request)
-	return nil, nil
-}
-
-func (l *Actor) Terminate(reason error) {}
-
-func (l *Actor) HandleInspect(from gen.PID, item ...string) map[string]string {
-	return map[string]string{
-		"cluster": l.clusterID,
-		"term":    fmt.Sprintf("%d", l.term),
-		"leader":  fmt.Sprintf("%v", l.isLeader),
-		"peers":   fmt.Sprintf("%d", len(l.peers)),
-	}
-}
-
-func (l *Actor) HandlePeerJoined(peer gen.PID) error             { return nil }
-func (l *Actor) HandlePeerLeft(peer gen.PID) error               { return nil }
-func (l *Actor) HandleTermChanged(oldTerm, newTerm uint64) error { return nil }
-
-// Public API for embedding
 
 // IsLeader returns true if this node is the leader
 func (l *Actor) IsLeader() bool {
@@ -423,9 +392,9 @@ func (l *Actor) becomeFollower() error {
 	l.leader = gen.PID{}
 	l.votesReceived = nil
 
-	if wasLeader {
+	if wasLeader == true {
 		if err := l.behavior.HandleBecomeFollower(gen.PID{}); err != nil {
-			return fmt.Errorf("HandleBecomeFollower: %w", err)
+			return err
 		}
 	}
 
@@ -443,7 +412,7 @@ func (l *Actor) becomeCandidate() error {
 	votes := 1 // vote for self
 	quorum := len(l.peers)/2 + 1
 
-	l.Log().Info("election: term=%d peers=%d quorum=%d", l.term, len(l.peers), quorum)
+	l.Log().Debug("election: term=%d peers=%d quorum=%d", l.term, len(l.peers), quorum)
 
 	vote := msgVote{
 		ClusterID: l.clusterID,
@@ -462,11 +431,9 @@ func (l *Actor) becomeCandidate() error {
 		l.Send(b, vote)
 	}
 
-	// Only become leader immediately if we're the only node (no peers)
+	// only become leader immediately if we're the only node (no peers)
 	if votes >= quorum {
-		if err := l.becomeLeader(); err != nil {
-			return err
-		}
+		return l.becomeLeader()
 	}
 	return nil
 }
@@ -478,11 +445,10 @@ func (l *Actor) becomeLeader() error {
 	l.cancelElectionTimer()
 	l.resetHeartbeatTimer()
 
-	l.Log().Info("became leader: term=%d", l.term)
+	l.Log().Debug("became leader: term=%d", l.term)
 	if err := l.behavior.HandleBecomeLeader(); err != nil {
-		// Step down on critical callback failure
 		l.becomeFollower()
-		return fmt.Errorf("HandleBecomeLeader: %w", err)
+		return err
 	}
 
 	l.sendHeartbeat()
@@ -526,25 +492,37 @@ func (l *Actor) handleVoteReply(from gen.PID, msg msgVoteReply) error {
 		return nil
 	}
 
-	// Only process vote replies if we're still a candidate for this term
-	if msg.Term == l.term && msg.Granted && l.isLeader == false && l.votedFor == l.PID() {
-		// Track this vote
-		l.votesReceived[from] = true
+	// only process vote replies if we're still a candidate for this term
+	if msg.Term != l.term {
+		return nil
+	}
 
-		// Count actual votes received
-		votes := 1 // vote for self
-		for _, granted := range l.votesReceived {
-			if granted {
-				votes++
-			}
-		}
+	if msg.Granted == false {
+		return nil
+	}
 
-		quorum := len(l.peers)/2 + 1
-		if votes >= quorum {
-			if err := l.becomeLeader(); err != nil {
-				return err
-			}
+	if l.isLeader == true {
+		return nil
+	}
+
+	if l.votedFor != l.PID() {
+		return nil
+	}
+
+	// track this vote
+	l.votesReceived[from] = true
+
+	// count actual votes received
+	votes := 1 // vote for self
+	for _, granted := range l.votesReceived {
+		if granted == true {
+			votes++
 		}
+	}
+
+	quorum := len(l.peers)/2 + 1
+	if votes >= quorum {
+		return l.becomeLeader()
 	}
 
 	return nil
@@ -564,9 +542,9 @@ func (l *Actor) handleHeartbeat(from gen.PID, msg msgHeartbeat) error {
 		}
 	}
 
-	// If we receive heartbeat in same term while being leader
-	// This indicates split-brain - step down to be safe
-	if msg.Term == l.term && l.isLeader {
+	// if we receive heartbeat in same term while being leader,
+	// this indicates split-brain - step down to be safe
+	if msg.Term == l.term && l.isLeader == true {
 		l.Log().
 			Warning("received heartbeat from %s claiming leadership in same term %d - stepping down", from, msg.Term)
 		if err := l.becomeFollower(); err != nil {
@@ -577,7 +555,7 @@ func (l *Actor) handleHeartbeat(from gen.PID, msg msgHeartbeat) error {
 	if l.leader != msg.Leader {
 		l.leader = msg.Leader
 		if err := l.behavior.HandleBecomeFollower(l.leader); err != nil {
-			return fmt.Errorf("HandleBecomeFollower: %w", err)
+			return err
 		}
 	}
 
@@ -586,19 +564,20 @@ func (l *Actor) handleHeartbeat(from gen.PID, msg msgHeartbeat) error {
 }
 
 func (l *Actor) handleElectionTimeout() error {
-	if l.isLeader == false {
-		if err := l.becomeCandidate(); err != nil {
-			return err
-		}
+	if l.isLeader == true {
+		return nil
 	}
-	return nil
+
+	return l.becomeCandidate()
 }
 
 func (l *Actor) handleHeartbeatTimeout() error {
-	if l.isLeader {
-		l.sendHeartbeat()
-		l.resetHeartbeatTimer()
+	if l.isLeader == false {
+		return nil
 	}
+
+	l.sendHeartbeat()
+	l.resetHeartbeatTimer()
 	return nil
 }
 
@@ -624,7 +603,7 @@ func (l *Actor) sendHeartbeat() {
 func (l *Actor) randomElectionTimeout() time.Duration {
 	diff := l.electionTimeoutMax - l.electionTimeoutMin
 	if diff <= 0 {
-		// Should never happen due to validation, but be defensive
+		// should never happen due to validation, but be defensive
 		return time.Duration(l.electionTimeoutMin) * time.Millisecond
 	}
 	timeout := l.electionTimeoutMin + rand.Intn(diff)
@@ -665,11 +644,38 @@ func (l *Actor) setTerm(newTerm uint64) error {
 	oldTerm := l.term
 	l.term = newTerm
 
-	// Notify behavior of term change (skip initial term 0)
+	// notify behavior of term change (skip initial term 0)
 	if oldTerm > 0 {
-		if err := l.behavior.HandleTermChanged(oldTerm, newTerm); err != nil {
-			return fmt.Errorf("HandleTermChanged: %w", err)
-		}
+		return l.behavior.HandleTermChanged(oldTerm, newTerm)
 	}
 	return nil
 }
+
+//
+// default callbacks
+//
+
+func (l *Actor) HandleMessage(from gen.PID, message any) error {
+	l.Log().Warning("Leader.HandleMessage: unhandled message from %s: %T", from, message)
+	return nil
+}
+
+func (l *Actor) HandleCall(from gen.PID, ref gen.Ref, request any) (any, error) {
+	l.Log().Warning("Leader.HandleCall: unhandled request from %s: %T", from, request)
+	return nil, nil
+}
+
+func (l *Actor) Terminate(reason error) {}
+
+func (l *Actor) HandleInspect(from gen.PID, item ...string) map[string]string {
+	return map[string]string{
+		"cluster": l.clusterID,
+		"term":    fmt.Sprintf("%d", l.term),
+		"leader":  fmt.Sprintf("%v", l.isLeader),
+		"peers":   fmt.Sprintf("%d", len(l.peers)),
+	}
+}
+
+func (l *Actor) HandlePeerJoined(peer gen.PID) error             { return nil }
+func (l *Actor) HandlePeerLeft(peer gen.PID) error               { return nil }
+func (l *Actor) HandleTermChanged(oldTerm, newTerm uint64) error { return nil }
