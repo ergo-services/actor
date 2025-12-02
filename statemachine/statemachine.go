@@ -135,13 +135,13 @@ type ActiveMessageTimeout struct {
 // Type alias for MessageHandler callbacks.
 // D is the type of the data associated with the StateMachine.
 // M is the type of the message this handler accepts.
-type StateMessageHandler[D any, M any] func(gen.Atom, D, M, gen.Process) (gen.Atom, D, []Action, error)
+type StateMessageHandler[D any, M any] func(gen.PID, gen.Atom, D, M, gen.Process) (gen.Atom, D, []Action, error)
 
 // Type alias for CallHandler callbacks.
 // D is the type of the data associated with the StateMachine.
 // M is the type of the message this handler accepts.
 // R is the type of the result value.
-type StateCallHandler[D any, M any, R any] func(gen.Atom, D, M, gen.Process) (gen.Atom, D, R, []Action, error)
+type StateCallHandler[D any, M any, R any] func(gen.PID, gen.Atom, D, M, gen.Process) (gen.Atom, D, R, []Action, error)
 
 // Type alias for event handler callbacks.
 // D is the type of the data associated with the StateMachine.
@@ -590,12 +590,13 @@ func (s *StateMachine[D]) lookupMessageHandler(messageType string) (any, bool) {
 func (s *StateMachine[D]) invokeMessageHandler(handler any, message *gen.MailboxMessage) error {
 	stateMachineValue := reflect.ValueOf(s)
 	callbackValue := reflect.ValueOf(handler)
+	fromValue := reflect.ValueOf(message.From)
 	stateValue := reflect.ValueOf(s.currentState)
 	dataValue := reflect.ValueOf(s.Data())
 	msgValue := reflect.ValueOf(message.Message)
 	messageType := reflect.TypeOf(message).String()
 
-	results := callbackValue.Call([]reflect.Value{stateValue, dataValue, msgValue, stateMachineValue})
+	results := callbackValue.Call([]reflect.Value{fromValue, stateValue, dataValue, msgValue, stateMachineValue})
 
 	validateResultSize(results, 4, messageType)
 	if isError, err := resultIsError(results); isError == true {
@@ -617,12 +618,13 @@ func (s *StateMachine[D]) lookupCallHandler(messageType string) (any, bool) {
 func (s *StateMachine[D]) invokeCallHandler(handler any, message *gen.MailboxMessage) (any, error) {
 	stateMachineValue := reflect.ValueOf(s)
 	callbackValue := reflect.ValueOf(handler)
+	fromValue := reflect.ValueOf(message.From)
 	stateValue := reflect.ValueOf(s.currentState)
 	dataValue := reflect.ValueOf(s.Data())
 	msgValue := reflect.ValueOf(message.Message)
 	messageType := reflect.TypeOf(message).String()
 
-	results := callbackValue.Call([]reflect.Value{stateValue, dataValue, msgValue, stateMachineValue})
+	results := callbackValue.Call([]reflect.Value{fromValue, stateValue, dataValue, msgValue, stateMachineValue})
 
 	validateResultSize(results, 5, messageType)
 	if isError, err := resultIsError(results); isError == true {
