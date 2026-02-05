@@ -17,7 +17,7 @@ Distributed leader election actor implementing Raft-inspired consensus algorithm
 - Dynamic peer discovery
 - No external dependencies
 
-See [documentation](https://devel.docs.ergo.services/extra-library/actors/leader) for details.
+See [documentation](https://docs.ergo.services/extra-library/actors/leader) for details.
 
 ## metrics
 
@@ -31,4 +31,4 @@ Prometheus metrics exporter actor that automatically collects and exposes Ergo n
 - Configurable collection interval
 - Observer UI integration for real-time inspection
 
-See [documentation](https://devel.docs.ergo.services/extra-library/actors/metrics) for details.
+See [documentation](https://docs.ergo.services/extra-library/actors/metrics) for details.
