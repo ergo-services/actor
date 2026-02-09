@@ -212,38 +212,43 @@ func (a *Actor) initializeMetrics() error {
 	})
 	a.remoteNodeUptime = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "ergo_remote_node_uptime_seconds",
-			Help: "Remote node uptime in seconds",
+			Name:        "ergo_remote_node_uptime_seconds",
+			Help:        "Remote node uptime in seconds",
+			ConstLabels: nodeLabels,
 		},
-		[]string{"node"},
+		[]string{"remote_node"},
 	)
 	a.remoteMessagesIn = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "ergo_remote_messages_in_total",
-			Help: "Total number of messages received from remote node",
+			Name:        "ergo_remote_messages_in_total",
+			Help:        "Total number of messages received from remote node",
+			ConstLabels: nodeLabels,
 		},
-		[]string{"node"},
+		[]string{"remote_node"},
 	)
 	a.remoteMessagesOut = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "ergo_remote_messages_out_total",
-			Help: "Total number of messages sent to remote node",
+			Name:        "ergo_remote_messages_out_total",
+			Help:        "Total number of messages sent to remote node",
+			ConstLabels: nodeLabels,
 		},
-		[]string{"node"},
+		[]string{"remote_node"},
 	)
 	a.remoteBytesIn = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "ergo_remote_bytes_in_total",
-			Help: "Total number of bytes received from remote node",
+			Name:        "ergo_remote_bytes_in_total",
+			Help:        "Total number of bytes received from remote node",
+			ConstLabels: nodeLabels,
 		},
-		[]string{"node"},
+		[]string{"remote_node"},
 	)
 	a.remoteBytesOut = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "ergo_remote_bytes_out_total",
-			Help: "Total number of bytes sent to remote node",
+			Name:        "ergo_remote_bytes_out_total",
+			Help:        "Total number of bytes sent to remote node",
+			ConstLabels: nodeLabels,
 		},
-		[]string{"node"},
+		[]string{"remote_node"},
 	)
 
 	// Register all base metrics
