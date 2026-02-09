@@ -134,64 +134,81 @@ func (a *Actor) ProcessInit(process gen.Process, args ...any) (rr error) {
 }
 
 func (a *Actor) initializeMetrics() error {
+	nodeName := string(a.Node().Name())
+	nodeLabels := prometheus.Labels{"node": nodeName}
+
 	// Node metrics
 	a.nodeUptime = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "ergo_node_uptime_seconds",
-		Help: "Node uptime in seconds",
+		Name:        "ergo_node_uptime_seconds",
+		Help:        "Node uptime in seconds",
+		ConstLabels: nodeLabels,
 	})
 	a.processesTotal = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "ergo_processes_total",
-		Help: "Total number of processes",
+		Name:        "ergo_processes_total",
+		Help:        "Total number of processes",
+		ConstLabels: nodeLabels,
 	})
 	a.processesRunning = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "ergo_processes_running",
-		Help: "Number of running processes",
+		Name:        "ergo_processes_running",
+		Help:        "Number of running processes",
+		ConstLabels: nodeLabels,
 	})
 	a.processesZombie = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "ergo_processes_zombie",
-		Help: "Number of zombie processes",
+		Name:        "ergo_processes_zombie",
+		Help:        "Number of zombie processes",
+		ConstLabels: nodeLabels,
 	})
 	a.memoryUsed = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "ergo_memory_used_bytes",
-		Help: "Memory used in bytes",
+		Name:        "ergo_memory_used_bytes",
+		Help:        "Memory used in bytes",
+		ConstLabels: nodeLabels,
 	})
 	a.memoryAlloc = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "ergo_memory_alloc_bytes",
-		Help: "Memory allocated in bytes",
+		Name:        "ergo_memory_alloc_bytes",
+		Help:        "Memory allocated in bytes",
+		ConstLabels: nodeLabels,
 	})
 	a.userTime = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "ergo_cpu_user_seconds",
-		Help: "User CPU time in seconds",
+		Name:        "ergo_cpu_user_seconds",
+		Help:        "User CPU time in seconds",
+		ConstLabels: nodeLabels,
 	})
 	a.systemTime = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "ergo_cpu_system_seconds",
-		Help: "System CPU time in seconds",
+		Name:        "ergo_cpu_system_seconds",
+		Help:        "System CPU time in seconds",
+		ConstLabels: nodeLabels,
 	})
 	a.applicationsTotal = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "ergo_applications_total",
-		Help: "Total number of applications",
+		Name:        "ergo_applications_total",
+		Help:        "Total number of applications",
+		ConstLabels: nodeLabels,
 	})
 	a.applicationsRunning = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "ergo_applications_running",
-		Help: "Number of running applications",
+		Name:        "ergo_applications_running",
+		Help:        "Number of running applications",
+		ConstLabels: nodeLabels,
 	})
 	a.registeredNames = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "ergo_registered_names_total",
-		Help: "Total number of registered names",
+		Name:        "ergo_registered_names_total",
+		Help:        "Total number of registered names",
+		ConstLabels: nodeLabels,
 	})
 	a.registeredAliases = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "ergo_registered_aliases_total",
-		Help: "Total number of registered aliases",
+		Name:        "ergo_registered_aliases_total",
+		Help:        "Total number of registered aliases",
+		ConstLabels: nodeLabels,
 	})
 	a.registeredEvents = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "ergo_registered_events_total",
-		Help: "Total number of registered events",
+		Name:        "ergo_registered_events_total",
+		Help:        "Total number of registered events",
+		ConstLabels: nodeLabels,
 	})
 
 	// Network metrics
 	a.connectedNodes = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "ergo_connected_nodes_total",
-		Help: "Total number of connected nodes",
+		Name:        "ergo_connected_nodes_total",
+		Help:        "Total number of connected nodes",
+		ConstLabels: nodeLabels,
 	})
 	a.remoteNodeUptime = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
