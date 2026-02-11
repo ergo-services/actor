@@ -59,6 +59,7 @@ type Actor struct {
 	memoryAlloc         prometheus.Gauge
 	userTime            prometheus.Gauge
 	systemTime          prometheus.Gauge
+	cpuCores            prometheus.Gauge
 	applicationsTotal   prometheus.Gauge
 	applicationsRunning prometheus.Gauge
 	registeredNames     prometheus.Gauge
@@ -178,6 +179,11 @@ func (a *Actor) initializeMetrics() error {
 		Help:        "System CPU time in seconds",
 		ConstLabels: nodeLabels,
 	})
+	a.cpuCores = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name:        "ergo_cpu_cores",
+		Help:        "Number of CPU cores available",
+		ConstLabels: nodeLabels,
+	})
 	a.applicationsTotal = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name:        "ergo_applications_total",
 		Help:        "Total number of applications",
@@ -261,6 +267,7 @@ func (a *Actor) initializeMetrics() error {
 		a.memoryAlloc,
 		a.userTime,
 		a.systemTime,
+		a.cpuCores,
 		a.applicationsTotal,
 		a.applicationsRunning,
 		a.registeredNames,
@@ -318,6 +325,7 @@ func (a *Actor) collectBaseMetrics() error {
 	a.memoryAlloc.Set(float64(nodeInfo.MemoryAlloc))
 	a.userTime.Set(float64(nodeInfo.UserTime) / 1e9)
 	a.systemTime.Set(float64(nodeInfo.SystemTime) / 1e9)
+	a.cpuCores.Set(float64(runtime.NumCPU()))
 	a.applicationsTotal.Set(float64(nodeInfo.ApplicationsTotal))
 	a.applicationsRunning.Set(float64(nodeInfo.ApplicationsRunning))
 	a.registeredNames.Set(float64(nodeInfo.RegisteredNames))
