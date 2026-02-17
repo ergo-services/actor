@@ -128,6 +128,9 @@ func (m *MyMetrics) CollectMetrics() error {
 | `ergo_processes_total` | Gauge | Total number of processes |
 | `ergo_processes_running` | Gauge | Number of running processes |
 | `ergo_processes_zombie` | Gauge | Number of zombie processes |
+| `ergo_processes_spawned_total` | Gauge | Cumulative number of successfully spawned processes |
+| `ergo_processes_spawn_failed_total` | Gauge | Cumulative number of failed spawn attempts |
+| `ergo_processes_terminated_total` | Gauge | Cumulative number of terminated processes |
 | `ergo_memory_used_bytes` | Gauge | Memory used in bytes |
 | `ergo_memory_alloc_bytes` | Gauge | Memory allocated in bytes |
 | `ergo_cpu_user_seconds` | Gauge | User CPU time in seconds |
