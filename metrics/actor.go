@@ -54,8 +54,11 @@ type Actor struct {
 	nodeUptime          prometheus.Gauge
 	processesTotal      prometheus.Gauge
 	processesRunning    prometheus.Gauge
-	processesZombie     prometheus.Gauge
-	memoryUsed          prometheus.Gauge
+	processesZombie      prometheus.Gauge
+	processesSpawned     prometheus.Gauge
+	processesSpawnFailed prometheus.Gauge
+	processesTerminated  prometheus.Gauge
+	memoryUsed           prometheus.Gauge
 	memoryAlloc         prometheus.Gauge
 	userTime            prometheus.Gauge
 	systemTime          prometheus.Gauge
@@ -157,6 +160,21 @@ func (a *Actor) initializeMetrics() error {
 	a.processesZombie = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name:        "ergo_processes_zombie",
 		Help:        "Number of zombie processes",
+		ConstLabels: nodeLabels,
+	})
+	a.processesSpawned = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name:        "ergo_processes_spawned_total",
+		Help:        "Cumulative number of successfully spawned processes",
+		ConstLabels: nodeLabels,
+	})
+	a.processesSpawnFailed = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name:        "ergo_processes_spawn_failed_total",
+		Help:        "Cumulative number of failed spawn attempts",
+		ConstLabels: nodeLabels,
+	})
+	a.processesTerminated = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name:        "ergo_processes_terminated_total",
+		Help:        "Cumulative number of terminated processes",
 		ConstLabels: nodeLabels,
 	})
 	a.memoryUsed = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -263,6 +281,9 @@ func (a *Actor) initializeMetrics() error {
 		a.processesTotal,
 		a.processesRunning,
 		a.processesZombie,
+		a.processesSpawned,
+		a.processesSpawnFailed,
+		a.processesTerminated,
 		a.memoryUsed,
 		a.memoryAlloc,
 		a.userTime,
@@ -321,6 +342,9 @@ func (a *Actor) collectBaseMetrics() error {
 	a.processesTotal.Set(float64(nodeInfo.ProcessesTotal))
 	a.processesRunning.Set(float64(nodeInfo.ProcessesRunning))
 	a.processesZombie.Set(float64(nodeInfo.ProcessesZombee))
+	a.processesSpawned.Set(float64(nodeInfo.ProcessesSpawned))
+	a.processesSpawnFailed.Set(float64(nodeInfo.ProcessesSpawnFailed))
+	a.processesTerminated.Set(float64(nodeInfo.ProcessesTerminated))
 	a.memoryUsed.Set(float64(nodeInfo.MemoryUsed))
 	a.memoryAlloc.Set(float64(nodeInfo.MemoryAlloc))
 	a.userTime.Set(float64(nodeInfo.UserTime) / 1e9)
