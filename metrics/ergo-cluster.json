@@ -84,18 +84,14 @@
     {
       "id": 52,
       "title": "Latency Distribution",
-      "type": "heatmap",
+      "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 9},
       "targets": [{
-        "expr": "sum(rate(ergo_mailbox_latency_seconds_bucket{node=~\"$node\"}[$__rate_interval])) by (le)",
-        "format": "heatmap",
-        "legendFormat": "{{le}}"
+        "expr": "sum by (range) (ergo_mailbox_latency_distribution{node=~\"$node\"})",
+        "legendFormat": "{{range}}"
       }],
-      "options": {
-        "calculate": false,
-        "yAxis": {"unit": "s"},
-        "color": {"scheme": "Oranges"}
-      }
+      "fieldConfig": {"defaults": {"custom": {"stacking": {"mode": "normal"}, "fillOpacity": 80, "lineWidth": 0}}},
+      "options": {"legend": {"displayMode": "table", "placement": "right"}}
     },
     {
       "id": 53,
