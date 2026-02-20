@@ -69,6 +69,9 @@ type Actor struct {
 	registeredAliases   prometheus.Gauge
 	registeredEvents    prometheus.Gauge
 
+	// Latency metrics (enabled with -tags=latency)
+	latency latencyMetrics
+
 	// Network metrics
 	connectedNodes    prometheus.Gauge
 	remoteNodeUptime  *prometheus.GaugeVec
@@ -125,6 +128,9 @@ func (a *Actor) ProcessInit(process gen.Process, args ...any) (rr error) {
 	}
 	if a.options.CollectInterval < 1 {
 		a.options.CollectInterval = DefaultCollectInterval
+	}
+	if a.options.LatencyTopN < 1 {
+		a.options.LatencyTopN = DefaultLatencyTopN
 	}
 
 	// Start HTTP server for /metrics endpoint
@@ -275,6 +281,9 @@ func (a *Actor) initializeMetrics() error {
 		[]string{"remote_node"},
 	)
 
+	// Initialize latency metrics (no-op without -tags=latency)
+	a.latency.init(a.registry, nodeLabels, a.options.LatencyTopN)
+
 	// Register all base metrics
 	a.registry.MustRegister(
 		a.nodeUptime,
@@ -386,6 +395,9 @@ func (a *Actor) collectBaseMetrics() error {
 		a.remoteBytesIn.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.BytesIn))
 		a.remoteBytesOut.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.BytesOut))
 	}
+
+	// Collect latency metrics (no-op without -tags=latency)
+	a.latency.collect(a.Node())
 
 	return nil
 }
