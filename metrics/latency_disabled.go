@@ -10,7 +10,7 @@ import (
 
 type latencyMetrics struct{}
 
-func (lm *latencyMetrics) init(registry *prometheus.Registry, nodeLabels prometheus.Labels, topN int) {
+func (lm *latencyMetrics) init(registry *prometheus.Registry, nodeLabels prometheus.Labels) {
 }
 
-func (lm *latencyMetrics) collect(node gen.Node) {}
+func (lm *latencyMetrics) collect(node gen.Node, topN int) {}

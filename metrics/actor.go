@@ -282,7 +282,7 @@ func (a *Actor) initializeMetrics() error {
 	)
 
 	// Initialize latency metrics (no-op without -tags=latency)
-	a.latency.init(a.registry, nodeLabels, a.options.LatencyTopN)
+	a.latency.init(a.registry, nodeLabels)
 
 	// Register all base metrics
 	a.registry.MustRegister(
@@ -397,7 +397,7 @@ func (a *Actor) collectBaseMetrics() error {
 	}
 
 	// Collect latency metrics (no-op without -tags=latency)
-	a.latency.collect(a.Node())
+	a.latency.collect(a.Node(), a.options.LatencyTopN)
 
 	return nil
 }

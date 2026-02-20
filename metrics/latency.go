@@ -19,12 +19,9 @@ type latencyMetrics struct {
 	maxLatency    prometheus.Gauge
 	stressedCount prometheus.Gauge
 	topLatency    *prometheus.GaugeVec
-	topN          int
 }
 
-func (lm *latencyMetrics) init(registry *prometheus.Registry, nodeLabels prometheus.Labels, topN int) {
-	lm.topN = topN
-
+func (lm *latencyMetrics) init(registry *prometheus.Registry, nodeLabels prometheus.Labels) {
 	lm.histogram = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Name:        "ergo_mailbox_latency_seconds",
 		Help:        "Distribution of mailbox latency across all processes (oldest message age)",
@@ -61,7 +58,7 @@ func (lm *latencyMetrics) init(registry *prometheus.Registry, nodeLabels prometh
 	)
 }
 
-func (lm *latencyMetrics) collect(node gen.Node) {
+func (lm *latencyMetrics) collect(node gen.Node, topN int) {
 	var maxLat float64
 	var stressed float64
 	h := &topNHeap{}
@@ -87,7 +84,7 @@ func (lm *latencyMetrics) collect(node gen.Node) {
 			behavior:    info.Behavior,
 		}
 
-		if h.Len() < lm.topN {
+		if h.Len() < topN {
 			heap.Push(h, entry)
 		} else if seconds > (*h)[0].seconds {
 			(*h)[0] = entry
