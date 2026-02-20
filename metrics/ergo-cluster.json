@@ -66,38 +66,35 @@
     {
       "id": 50,
       "title": "Max Latency",
-      "type": "stat",
+      "type": "timeseries",
       "gridPos": {"h": 4, "w": 12, "x": 0, "y": 5},
       "targets": [{"expr": "max(ergo_mailbox_latency_max_seconds{node=~\"$node\"})", "legendFormat": "Max"}],
-      "options": {"colorMode": "value", "graphMode": "area"},
-      "fieldConfig": {"defaults": {"unit": "s", "color": {"mode": "thresholds"}, "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 0.1}, {"color": "red", "value": 1}]}}}
+      "fieldConfig": {"defaults": {"unit": "s", "custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity", "lineWidth": 1}, "color": {"mode": "fixed", "fixedColor": "red"}}},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "calcs": ["lastNotNull"]}, "tooltip": {"mode": "single"}}
     },
     {
       "id": 51,
       "title": "Stressed Processes",
-      "type": "stat",
-      "gridPos": {"h": 4, "w": 12, "x": 12, "y": 5},
-      "targets": [{"expr": "sum(ergo_mailbox_latency_processes{node=~\"$node\"})", "legendFormat": "Stressed"}],
-      "options": {"colorMode": "value", "graphMode": "area"},
-      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 10}, {"color": "red", "value": 100}]}}}
-    },
-    {
-      "id": 52,
-      "title": "Latency Distribution",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 9},
-      "targets": [{
-        "expr": "sum by (range) (ergo_mailbox_latency_distribution{node=~\"$node\"})",
-        "legendFormat": "{{range}}"
-      }],
-      "fieldConfig": {"defaults": {"custom": {"stacking": {"mode": "normal"}, "fillOpacity": 80, "lineWidth": 0}}},
-      "options": {"legend": {"displayMode": "table", "placement": "right"}}
+      "gridPos": {"h": 4, "w": 12, "x": 12, "y": 5},
+      "targets": [
+        {"expr": "sum(ergo_mailbox_latency_distribution{node=~\"$node\", range=\"1ms\"})", "legendFormat": "< 1ms"},
+        {"expr": "sum(ergo_mailbox_latency_distribution{node=~\"$node\", range!=\"1ms\"})", "legendFormat": "\u2265 1ms"}
+      ],
+      "fieldConfig": {
+        "defaults": {"custom": {"stacking": {"mode": "normal"}, "fillOpacity": 60, "lineWidth": 1, "lineInterpolation": "smooth"}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "< 1ms"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "light-blue"}}]},
+          {"matcher": {"id": "byName", "options": "\u2265 1ms"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "calcs": ["lastNotNull"]}, "tooltip": {"mode": "multi"}}
     },
     {
       "id": 53,
       "title": "Max Latency per Node",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 9},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 9},
       "targets": [
         {"expr": "ergo_mailbox_latency_max_seconds{node=~\"$node\"}", "legendFormat": "{{node}}"}
       ],
@@ -108,11 +105,49 @@
       "id": 54,
       "title": "Stressed Processes per Node",
       "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 17},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 9},
       "targets": [
         {"expr": "ergo_mailbox_latency_processes{node=~\"$node\"}", "legendFormat": "{{node}}"}
       ],
       "fieldConfig": {"defaults": {"custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}}},
+      "options": {"legend": {"displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 52,
+      "title": "Latency Distribution",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 17},
+      "targets": [
+        {"expr": "sum(ergo_mailbox_latency_distribution{node=~\"$node\", range=\"60s+\"})", "legendFormat": "60s+"},
+        {"expr": "sum(ergo_mailbox_latency_distribution{node=~\"$node\", range=\"60s\"})", "legendFormat": "60s"},
+        {"expr": "sum(ergo_mailbox_latency_distribution{node=~\"$node\", range=\"30s\"})", "legendFormat": "30s"},
+        {"expr": "sum(ergo_mailbox_latency_distribution{node=~\"$node\", range=\"10s\"})", "legendFormat": "10s"},
+        {"expr": "sum(ergo_mailbox_latency_distribution{node=~\"$node\", range=\"5s\"})", "legendFormat": "5s"},
+        {"expr": "sum(ergo_mailbox_latency_distribution{node=~\"$node\", range=\"1s\"})", "legendFormat": "1s"},
+        {"expr": "sum(ergo_mailbox_latency_distribution{node=~\"$node\", range=\"500ms\"})", "legendFormat": "500ms"},
+        {"expr": "sum(ergo_mailbox_latency_distribution{node=~\"$node\", range=\"100ms\"})", "legendFormat": "100ms"},
+        {"expr": "sum(ergo_mailbox_latency_distribution{node=~\"$node\", range=\"50ms\"})", "legendFormat": "50ms"},
+        {"expr": "sum(ergo_mailbox_latency_distribution{node=~\"$node\", range=\"10ms\"})", "legendFormat": "10ms"},
+        {"expr": "sum(ergo_mailbox_latency_distribution{node=~\"$node\", range=\"5ms\"})", "legendFormat": "5ms"},
+        {"expr": "sum(ergo_mailbox_latency_distribution{node=~\"$node\", range=\"1ms\"})", "legendFormat": "1ms"}
+      ],
+      "fieldConfig": {
+        "defaults": {"custom": {"stacking": {"mode": "normal"}, "fillOpacity": 80, "lineWidth": 0, "lineInterpolation": "smooth"}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "60s+"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#8B0000"}}]},
+          {"matcher": {"id": "byName", "options": "60s"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#C4162A"}}]},
+          {"matcher": {"id": "byName", "options": "30s"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#E02F44"}}]},
+          {"matcher": {"id": "byName", "options": "10s"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#F2495C"}}]},
+          {"matcher": {"id": "byName", "options": "5s"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#FF6243"}}]},
+          {"matcher": {"id": "byName", "options": "1s"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#FF7835"}}]},
+          {"matcher": {"id": "byName", "options": "500ms"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#FF9830"}}]},
+          {"matcher": {"id": "byName", "options": "100ms"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#F2CC0C"}}]},
+          {"matcher": {"id": "byName", "options": "50ms"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#FADE2A"}}]},
+          {"matcher": {"id": "byName", "options": "10ms"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#B5CE3E"}}]},
+          {"matcher": {"id": "byName", "options": "5ms"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#96D98D"}}]},
+          {"matcher": {"id": "byName", "options": "1ms"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#73BF69"}}]}
+        ]
+      },
       "options": {"legend": {"displayMode": "table", "placement": "right"}}
     },
     {
@@ -127,14 +162,30 @@
       }],
       "transformations": [
         {"id": "organize", "options": {
-          "excludeByName": {"Time": true, "__name__": true, "instance": true, "job": true, "endpoint": true, "prometheus": true},
+          "excludeByName": {"Time": true, "__name__": true},
+          "indexByName": {
+            "application": 0,
+            "behavior": 1,
+            "name": 2,
+            "pid": 3,
+            "node": 4,
+            "Value": 5,
+            "pod": 6,
+            "container": 7,
+            "cluster": 8,
+            "service": 9
+          },
           "renameByName": {
-            "node": "Node",
-            "pid": "PID",
-            "name": "Name",
             "application": "Application",
             "behavior": "Behavior",
-            "Value": "Latency"
+            "name": "Name",
+            "pid": "PID",
+            "node": "Node",
+            "Value": "Latency",
+            "pod": "Pod",
+            "container": "Container",
+            "cluster": "Cluster",
+            "service": "Service"
           }
         }},
         {"id": "sortBy", "options": {"fields": {}, "sort": [{"field": "Latency", "desc": true}]}}
