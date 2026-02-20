@@ -168,26 +168,30 @@ Without the tag, latency measurement is disabled and no additional metrics are r
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `ergo_mailbox_latency_seconds` | Histogram | - | Distribution of mailbox latency across all processes |
+| `ergo_mailbox_latency_distribution` | Gauge | range | Number of processes in each latency range (snapshot per collect cycle) |
 | `ergo_mailbox_latency_max_seconds` | Gauge | - | Maximum mailbox latency on this node |
 | `ergo_mailbox_latency_processes` | Gauge | - | Number of processes with non-empty mailbox |
 | `ergo_mailbox_latency_top_seconds` | Gauge | pid, name, application, behavior | Top-N processes by mailbox latency |
 
-Histogram buckets: 1ms, 5ms, 10ms, 50ms, 100ms, 500ms, 1s, 5s, 10s, 30s, 60s.
+Distribution ranges: 1ms, 5ms, 10ms, 50ms, 100ms, 500ms, 1s, 5s, 10s, 30s, 60s, 60s+.
+
+Each range represents an upper boundary. For example, "5ms" counts processes with latency between 1ms and 5ms. The "60s+" range counts processes with latency above 60 seconds. Values are snapshots -- each collect cycle counts from scratch, so values reflect the current state, not cumulative history.
 
 #### Cardinality
 
 For a cluster of 500 nodes with `LatencyTopN=50`:
-- Histogram: 500 x 14 series = 7,000
+- Distribution: 500 x 12 series = 6,000
 - Max + Count gauges: 500 x 2 = 1,000
 - Top-N gauges: 500 x 50 = 25,000
-- Total: ~33,000 series
+- Total: ~32,000 series
 
 #### Grafana Queries
 
-Heatmap (latency distribution across the cluster):
+Latency distribution across the cluster (stacked timeseries):
 ```promql
-sum(rate(ergo_mailbox_latency_seconds_bucket[5m])) by (le)
+sum(ergo_mailbox_latency_distribution{node=~"$node", range="1ms"})
+sum(ergo_mailbox_latency_distribution{node=~"$node", range="5ms"})
+...one query per range for controlled legend order...
 ```
 
 Top 50 stressed processes across all nodes (table panel):
@@ -278,17 +282,12 @@ Six stat panels showing aggregated values for selected nodes:
 - **Memory Alloc** -- total runtime memory allocated across selected nodes. A significant difference between Used and Alloc may indicate memory fragmentation or that the runtime is holding memory that could be released
 - **Total Nodes** -- number of nodes matching the filter. Useful for quickly detecting if a node has left the cluster unexpectedly
 
-#### Processes
+#### Processes (collapsed row)
 
-Two timeseries graphs showing per-node process counts over time:
+A collapsed row containing four timeseries graphs. Click to expand.
 
 - **Processes (total)** -- total process count per node. Steady growth without a plateau may indicate a process leak (processes being spawned but never terminated)
 - **Processes (running)** -- running process count per node. Helps identify load distribution across the cluster -- uneven running counts may point to hotspot nodes
-
-#### Process Lifecycle
-
-Two timeseries graphs showing process spawn and termination rates:
-
 - **Process Spawn Rate** -- rate of successfully spawned processes per node. Also shows failed spawn attempts (in red). Spawn failures indicate resource exhaustion or configuration errors. A sudden spike in spawn rate may signal a restart loop
 - **Process Termination Rate** -- rate of terminated processes per node. When termination rate consistently exceeds spawn rate, the node is draining. When spawn rate exceeds termination rate, process count is growing -- correlate with the Processes panel to verify
 
@@ -329,25 +328,42 @@ Two timeseries graphs showing network activity between specific node pairs:
 
 #### Mailbox Latency (requires `-tags=latency`)
 
-A collapsed row that is only useful when the application is built with `-tags=latency`. When the tag is not used, these panels will show "No data". Expand the row to reveal six panels:
+An expanded row that appears right after the Summary. Only useful when the application is built with `-tags=latency`. When the tag is not used, these panels will show "No data".
 
-Two stat panels showing cluster-wide latency summary:
+Two timeseries panels at the top showing cluster-wide overview:
 
-- **Max Latency** -- maximum mailbox latency across all selected nodes. Color thresholds: green (under 100ms), yellow (100ms-1s), red (over 1s). A value above 1 second means at least one process has a message sitting in its mailbox for that long -- the process is either overloaded or stuck
-- **Stressed Processes** -- total number of processes with non-empty mailboxes across selected nodes. A high number relative to Total Processes indicates widespread backpressure
-
-One heatmap panel:
-
-- **Latency Distribution** -- heatmap of mailbox latency histogram buckets over time. Shows the distribution of latency values across all processes. A shift toward higher buckets over time indicates growing system stress. Useful for spotting latency trends that are not visible from the max value alone
+- **Max Latency** -- maximum mailbox latency across all selected nodes over time. Drawn in red. Hover on any point to see the exact value at that moment. A value above 1 second means at least one process has a message sitting in its mailbox for that long -- the process is either overloaded or stuck
+- **Stressed Processes** -- stacked timeseries showing two categories: processes with latency under 1ms (light-blue, typically normal) and processes with latency 1ms or above (orange, worth attention). The total height is the number of processes with non-empty mailboxes. A growing orange area indicates increasing backpressure
 
 Two timeseries graphs showing per-node breakdown:
 
 - **Max Latency per Node** -- maximum mailbox latency per node over time. Helps identify which specific nodes are experiencing backpressure. Persistent high latency on a single node while others are low points to a hotspot or a stuck process on that node
 - **Stressed Processes per Node** -- number of processes with non-empty mailboxes per node over time. Correlate with the Max Latency panel -- a node with high max latency but low stressed count has one problematic process, while high count with moderate latency suggests general overload
 
+One stacked timeseries panel:
+
+- **Latency Distribution** -- stacked area chart showing how many processes fall into each latency range over time. Uses a flame color gradient: green tones for low latency (1ms-10ms), yellow for moderate (50ms-100ms), orange for high (500ms-1s), red/dark-red for critical (5s-60s+). The legend is sorted from highest to lowest range. In a healthy system most of the area should be green/yellow. Growing red/orange areas indicate degradation
+
 One table panel:
 
-- **Top Stressed Processes** -- top 50 processes by mailbox latency across the cluster. Columns: Process (pid), Name, Application, Behavior, Latency. Sorted by latency descending. Directly answers the question "which process is the bottleneck?" -- use this to identify specific processes that need optimization or investigation
+- **Top Stressed Processes** -- top 50 processes by mailbox latency across the cluster. Columns: Application, Behavior, Name, PID, Node, Latency (plus Kubernetes labels when available: Pod, Container, Cluster, Service). Sorted by latency descending. Directly answers "which process is the bottleneck?"
+
+#### Reading the Latency Dashboard
+
+**Start here: Max Latency and Stressed Processes (top row).** These two panels give an immediate answer to "is there a problem right now?" If Max Latency is under 100ms and the Stressed Processes panel is mostly light-blue or empty -- the system is healthy, no further investigation needed.
+
+**React to these signals:**
+
+- Max Latency above 1 second -- at least one process is severely behind. Move to the Top Stressed Processes table to identify it by name, application, and behavior
+- Orange area growing in Stressed Processes -- multiple processes are accumulating latency above 1ms. Check the Latency Distribution panel to understand the severity spread
+- A sudden spike in Max Latency followed by a return to normal -- a temporary burst of load. Compare with spawn/termination rates in the Processes row to see if it correlates with process lifecycle events
+
+**Dig deeper:**
+
+1. **Identify the node.** Check Max Latency per Node and Stressed Processes per Node. If one node stands out while others are calm, the problem is localized -- look at that node's CPU, memory, and network panels
+2. **Identify the process.** Open the Top Stressed Processes table. The columns Application, Behavior, and Name tell you exactly what kind of actor is struggling. Multiple processes from the same application suggest the application itself is under pressure. A single process with extreme latency is likely stuck or blocked
+3. **Understand the distribution.** The Latency Distribution panel shows whether the problem is isolated (one red sliver at the top of an otherwise green chart) or systemic (the entire chart shifting from green toward orange/red over time). A systemic shift means the node is overloaded and needs either scaling or load shedding
+4. **Correlate with other panels.** High latency combined with high CPU suggests compute-bound processes. High latency with low CPU suggests processes are blocked on external I/O or waiting for responses from other actors. High latency with growing memory may indicate unbounded mailbox accumulation
 
 #### Nodes Overview
 
