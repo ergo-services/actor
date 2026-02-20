@@ -1,0 +1,371 @@
+{
+  "title": "Ergo Cluster",
+  "uid": "ergo-cluster",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Total Processes",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+      "targets": [{"expr": "sum(ergo_processes_total{node=~\"$node\"})", "legendFormat": "Total"}],
+      "options": {"colorMode": "value", "graphMode": "none"},
+      "fieldConfig": {"defaults": {"color": {"mode": "fixed", "fixedColor": "blue"}}}
+    },
+    {
+      "id": 2,
+      "title": "Running",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+      "targets": [{"expr": "sum(ergo_processes_running{node=~\"$node\"})", "legendFormat": "Running"}],
+      "options": {"colorMode": "value", "graphMode": "none"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"steps": [{"color": "green", "value": null}]}}}
+    },
+    {
+      "id": 3,
+      "title": "Zombie",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
+      "targets": [{"expr": "sum(ergo_processes_zombie{node=~\"$node\"})", "legendFormat": "Zombie"}],
+      "options": {"colorMode": "value", "graphMode": "none"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}}
+    },
+    {
+      "id": 4,
+      "title": "Memory Used",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0},
+      "targets": [{"expr": "sum(ergo_memory_used_bytes{node=~\"$node\"})", "legendFormat": "Used"}],
+      "fieldConfig": {"defaults": {"unit": "bytes", "color": {"mode": "fixed", "fixedColor": "blue"}}},
+      "options": {"colorMode": "value", "graphMode": "none"}
+    },
+    {
+      "id": 5,
+      "title": "Memory Alloc",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 4, "x": 16, "y": 0},
+      "targets": [{"expr": "sum(ergo_memory_alloc_bytes{node=~\"$node\"})", "legendFormat": "Alloc"}],
+      "fieldConfig": {"defaults": {"unit": "bytes", "color": {"mode": "fixed", "fixedColor": "blue"}}},
+      "options": {"colorMode": "value", "graphMode": "none"}
+    },
+    {
+      "id": 6,
+      "title": "Total Nodes",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 4, "x": 20, "y": 0},
+      "targets": [{"expr": "count(ergo_node_uptime_seconds{node=~\"$node\"})", "legendFormat": "Nodes"}],
+      "options": {"colorMode": "value", "graphMode": "none"}
+    },
+    {
+      "id": 10,
+      "title": "Processes (total)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "targets": [
+        {"expr": "ergo_processes_total{node=~\"$node\"}", "legendFormat": "{{node}}"}
+      ],
+      "fieldConfig": {"defaults": {"custom": {"lineInterpolation": "smooth"}}},
+      "options": {"legend": {"displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 11,
+      "title": "Processes (running)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "targets": [
+        {"expr": "ergo_processes_running{node=~\"$node\"}", "legendFormat": "{{node}}"}
+      ],
+      "fieldConfig": {"defaults": {"custom": {"lineInterpolation": "smooth"}}},
+      "options": {"legend": {"displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 14,
+      "title": "Process Spawn Rate",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "targets": [
+        {"expr": "rate(ergo_processes_spawned_total{node=~\"$node\"}[1m])", "legendFormat": "{{node}} spawned"},
+        {"expr": "rate(ergo_processes_spawn_failed_total{node=~\"$node\"}[1m])", "legendFormat": "{{node}} failed"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops", "custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}},
+        "overrides": [
+          {"matcher": {"id": "byRegexp", "options": ".*failed.*"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 15,
+      "title": "Process Termination Rate",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "targets": [
+        {"expr": "rate(ergo_processes_terminated_total{node=~\"$node\"}[1m])", "legendFormat": "{{node}} terminated"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops", "custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}}},
+      "options": {"legend": {"displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 12,
+      "title": "Memory (OS:used)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 28},
+      "targets": [
+        {"expr": "ergo_memory_used_bytes{node=~\"$node\"}", "legendFormat": "{{node}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes", "custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}}},
+      "options": {"legend": {"displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 13,
+      "title": "Memory (Runtime:alloc)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 28},
+      "targets": [
+        {"expr": "ergo_memory_alloc_bytes{node=~\"$node\"}", "legendFormat": "{{node}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes", "custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}}},
+      "options": {"legend": {"displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 20,
+      "title": "CPU User Time per Node",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
+      "targets": [
+        {"expr": "rate(ergo_cpu_user_seconds{node=~\"$node\"}[1m]) / on(node) ergo_cpu_cores", "legendFormat": "{{node}} user"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}}},
+      "options": {"legend": {"displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 21,
+      "title": "CPU System Time per Node",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
+      "targets": [
+        {"expr": "rate(ergo_cpu_system_seconds{node=~\"$node\"}[1m]) / on(node) ergo_cpu_cores", "legendFormat": "{{node}} system"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}}},
+      "options": {"legend": {"displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 30,
+      "title": "Network Messages (Cluster Total)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 36},
+      "targets": [
+        {"expr": "sum(rate(ergo_remote_messages_in_total[1m]))", "legendFormat": "← In"},
+        {"expr": "sum(rate(ergo_remote_messages_out_total[1m]))", "legendFormat": "→ Out"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "msg/s", "custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}}},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 31,
+      "title": "Network Traffic (Cluster Total)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 36},
+      "targets": [
+        {"expr": "sum(rate(ergo_remote_bytes_in_total[1m]))", "legendFormat": "← In"},
+        {"expr": "sum(rate(ergo_remote_bytes_out_total[1m]))", "legendFormat": "→ Out"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "Bps", "custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}}},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 32,
+      "title": "Network Messages per Node",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 44},
+      "targets": [
+        {"expr": "sum by (node) (rate(ergo_remote_messages_in_total{node=~\"$node\"}[1m]))", "legendFormat": "{{node}} ← in"},
+        {"expr": "sum by (node) (rate(ergo_remote_messages_out_total{node=~\"$node\"}[1m]))", "legendFormat": "{{node}} → out"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "msg/s", "custom": {"lineInterpolation": "smooth", "lineWidth": 1}}},
+      "options": {"legend": {"displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 33,
+      "title": "Network Traffic per Node",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 44},
+      "targets": [
+        {"expr": "sum by (node) (rate(ergo_remote_bytes_in_total{node=~\"$node\"}[1m]))", "legendFormat": "{{node}} ← in"},
+        {"expr": "sum by (node) (rate(ergo_remote_bytes_out_total{node=~\"$node\"}[1m]))", "legendFormat": "{{node}} → out"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "Bps", "custom": {"lineInterpolation": "smooth", "lineWidth": 1}}},
+      "options": {"legend": {"displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 34,
+      "title": "Network Messages Detail",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 52},
+      "targets": [
+        {"expr": "rate(ergo_remote_messages_in_total{node=~\"$node\"}[1m])", "legendFormat": "{{node}} ← {{remote_node}}"},
+        {"expr": "rate(ergo_remote_messages_out_total{node=~\"$node\"}[1m])", "legendFormat": "{{node}} → {{remote_node}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "msg/s", "custom": {"lineInterpolation": "smooth", "lineWidth": 1}}},
+      "options": {"legend": {"displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 35,
+      "title": "Network Traffic Detail",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 52},
+      "targets": [
+        {"expr": "rate(ergo_remote_bytes_in_total{node=~\"$node\"}[1m])", "legendFormat": "{{node}} ← {{remote_node}}"},
+        {"expr": "rate(ergo_remote_bytes_out_total{node=~\"$node\"}[1m])", "legendFormat": "{{node}} → {{remote_node}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "Bps", "custom": {"lineInterpolation": "smooth", "lineWidth": 1}}},
+      "options": {"legend": {"displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 49,
+      "type": "row",
+      "title": "Mailbox Latency (requires -tags=latency)",
+      "collapsed": true,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 60},
+      "panels": [
+        {
+          "id": 50,
+          "title": "Max Latency",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 61},
+          "targets": [{"expr": "max(ergo_mailbox_latency_max_seconds{node=~\"$node\"})", "legendFormat": "Max"}],
+          "options": {"colorMode": "value", "graphMode": "area"},
+          "fieldConfig": {"defaults": {"unit": "s", "color": {"mode": "thresholds"}, "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 0.1}, {"color": "red", "value": 1}]}}}
+        },
+        {
+          "id": 51,
+          "title": "Stressed Processes",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 61},
+          "targets": [{"expr": "sum(ergo_mailbox_latency_processes{node=~\"$node\"})", "legendFormat": "Stressed"}],
+          "options": {"colorMode": "value", "graphMode": "area"},
+          "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 10}, {"color": "red", "value": 100}]}}}
+        },
+        {
+          "id": 52,
+          "title": "Latency Distribution",
+          "type": "heatmap",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 65},
+          "targets": [{
+            "expr": "sum(rate(ergo_mailbox_latency_seconds_bucket{node=~\"$node\"}[$__rate_interval])) by (le)",
+            "format": "heatmap",
+            "legendFormat": "{{le}}"
+          }],
+          "options": {
+            "calculate": false,
+            "yAxis": {"unit": "s"},
+            "color": {"scheme": "Oranges"}
+          }
+        },
+        {
+          "id": 53,
+          "title": "Max Latency per Node",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 65},
+          "targets": [
+            {"expr": "ergo_mailbox_latency_max_seconds{node=~\"$node\"}", "legendFormat": "{{node}}"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "s", "custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}}},
+          "options": {"legend": {"displayMode": "table", "placement": "right"}}
+        },
+        {
+          "id": 54,
+          "title": "Stressed Processes per Node",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 73},
+          "targets": [
+            {"expr": "ergo_mailbox_latency_processes{node=~\"$node\"}", "legendFormat": "{{node}}"}
+          ],
+          "fieldConfig": {"defaults": {"custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}}},
+          "options": {"legend": {"displayMode": "table", "placement": "right"}}
+        },
+        {
+          "id": 55,
+          "title": "Top Stressed Processes",
+          "type": "table",
+          "gridPos": {"h": 10, "w": 12, "x": 12, "y": 73},
+          "targets": [{
+            "expr": "topk(50, ergo_mailbox_latency_top_seconds{node=~\"$node\"})",
+            "format": "table",
+            "instant": true
+          }],
+          "transformations": [
+            {"id": "organize", "options": {
+              "excludeByName": {"Time": true, "__name__": true, "instance": true, "job": true, "endpoint": true, "prometheus": true},
+              "renameByName": {
+                "node": "Node",
+                "pid": "PID",
+                "name": "Name",
+                "application": "Application",
+                "behavior": "Behavior",
+                "Value": "Latency"
+              }
+            }},
+            {"id": "sortBy", "options": {"fields": {}, "sort": [{"field": "Latency", "desc": true}]}}
+          ],
+          "fieldConfig": {
+            "overrides": [
+              {"matcher": {"id": "byName", "options": "Latency"}, "properties": [{"id": "unit", "value": "s"}]}
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": 40,
+      "title": "Nodes Overview",
+      "type": "table",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 61},
+      "targets": [
+        {"expr": "ergo_node_uptime_seconds{node=~\"$node\"}", "format": "table", "instant": true},
+        {"expr": "ergo_processes_total{node=~\"$node\"}", "format": "table", "instant": true},
+        {"expr": "ergo_processes_running{node=~\"$node\"}", "format": "table", "instant": true},
+        {"expr": "ergo_processes_zombie{node=~\"$node\"}", "format": "table", "instant": true},
+        {"expr": "ergo_memory_used_bytes{node=~\"$node\"}", "format": "table", "instant": true}
+      ],
+      "transformations": [
+        {"id": "merge"},
+        {"id": "organize", "options": {
+          "excludeByName": {"Time": true, "instance": true, "__name__": true, "endpoint": true, "job": true, "prometheus": true},
+          "renameByName": {
+            "node": "Node",
+            "Value #A": "Uptime",
+            "Value #B": "Processes",
+            "Value #C": "Running",
+            "Value #D": "Zombie",
+            "Value #E": "Memory"
+          }
+        }},
+        {"id": "sortBy", "options": {"fields": {}, "sort": [{"field": "Processes", "desc": true}]}}
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "Uptime"}, "properties": [{"id": "unit", "value": "s"}]},
+          {"matcher": {"id": "byName", "options": "Memory"}, "properties": [{"id": "unit", "value": "bytes"}]}
+        ]
+      }
+    }
+  ],
+  "schemaVersion": 38,
+  "time": {"from": "now-1h", "to": "now"},
+  "refresh": "10s",
+  "templating": {
+    "list": [
+      {
+        "name": "node",
+        "label": "Node",
+        "type": "query",
+        "query": "label_values(ergo_node_uptime_seconds, node)",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {"selected": true, "text": "All", "value": "$__all"}
+      }
+    ]
+  }
+}
