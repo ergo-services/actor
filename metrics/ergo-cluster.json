@@ -201,95 +201,93 @@
       "id": 70,
       "type": "row",
       "title": "Mailbox Depth",
-      "collapsed": true,
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 25},
-      "panels": [
-        {
-          "id": 71,
-          "title": "Max Depth",
-          "type": "timeseries",
-          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 26},
-          "targets": [
-            {"expr": "ergo_mailbox_depth_max{node=~\"$node\"}", "legendFormat": "{{node}}"}
-          ],
-          "fieldConfig": {"defaults": {"custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}, "color": {"mode": "palette-classic"}}},
-          "options": {"legend": {"displayMode": "table", "placement": "right"}, "tooltip": {"mode": "multi"}}
-        },
-        {
-          "id": 72,
-          "title": "Depth Distribution",
-          "type": "timeseries",
-          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 26},
-          "targets": [
-            {"expr": "sum(ergo_mailbox_depth_distribution{node=~\"$node\", range=\"10K+\"})", "legendFormat": "10K+"},
-            {"expr": "sum(ergo_mailbox_depth_distribution{node=~\"$node\", range=\"10K\"})", "legendFormat": "10K"},
-            {"expr": "sum(ergo_mailbox_depth_distribution{node=~\"$node\", range=\"5K\"})", "legendFormat": "5K"},
-            {"expr": "sum(ergo_mailbox_depth_distribution{node=~\"$node\", range=\"1K\"})", "legendFormat": "1K"},
-            {"expr": "sum(ergo_mailbox_depth_distribution{node=~\"$node\", range=\"500\"})", "legendFormat": "500"},
-            {"expr": "sum(ergo_mailbox_depth_distribution{node=~\"$node\", range=\"100\"})", "legendFormat": "100"},
-            {"expr": "sum(ergo_mailbox_depth_distribution{node=~\"$node\", range=\"50\"})", "legendFormat": "50"},
-            {"expr": "sum(ergo_mailbox_depth_distribution{node=~\"$node\", range=\"10\"})", "legendFormat": "10"},
-            {"expr": "sum(ergo_mailbox_depth_distribution{node=~\"$node\", range=\"5\"})", "legendFormat": "5"},
-            {"expr": "sum(ergo_mailbox_depth_distribution{node=~\"$node\", range=\"1\"})", "legendFormat": "1"}
-          ],
-          "fieldConfig": {
-            "defaults": {"custom": {"stacking": {"mode": "normal"}, "fillOpacity": 80, "lineWidth": 0, "lineInterpolation": "smooth"}},
-            "overrides": [
-              {"matcher": {"id": "byName", "options": "10K+"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#8B0000"}}]},
-              {"matcher": {"id": "byName", "options": "10K"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#E02F44"}}]},
-              {"matcher": {"id": "byName", "options": "5K"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#F2495C"}}]},
-              {"matcher": {"id": "byName", "options": "1K"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#FF7835"}}]},
-              {"matcher": {"id": "byName", "options": "500"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#FF9830"}}]},
-              {"matcher": {"id": "byName", "options": "100"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#F2CC0C"}}]},
-              {"matcher": {"id": "byName", "options": "50"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#FADE2A"}}]},
-              {"matcher": {"id": "byName", "options": "10"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#B5CE3E"}}]},
-              {"matcher": {"id": "byName", "options": "5"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#96D98D"}}]},
-              {"matcher": {"id": "byName", "options": "1"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#73BF69"}}]}
-            ]
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 25}
+    },
+    {
+      "id": 71,
+      "title": "Max Depth",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 26},
+      "targets": [
+        {"expr": "ergo_mailbox_depth_max{node=~\"$node\"}", "legendFormat": "{{node}}"}
+      ],
+      "fieldConfig": {"defaults": {"custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}, "color": {"mode": "palette-classic"}}},
+      "options": {"legend": {"displayMode": "table", "placement": "right"}, "tooltip": {"mode": "multi"}}
+    },
+    {
+      "id": 72,
+      "title": "Depth Distribution",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 26},
+      "targets": [
+        {"expr": "sum(ergo_mailbox_depth_distribution{node=~\"$node\", range=\"10K+\"})", "legendFormat": "10K+"},
+        {"expr": "sum(ergo_mailbox_depth_distribution{node=~\"$node\", range=\"10K\"})", "legendFormat": "10K"},
+        {"expr": "sum(ergo_mailbox_depth_distribution{node=~\"$node\", range=\"5K\"})", "legendFormat": "5K"},
+        {"expr": "sum(ergo_mailbox_depth_distribution{node=~\"$node\", range=\"1K\"})", "legendFormat": "1K"},
+        {"expr": "sum(ergo_mailbox_depth_distribution{node=~\"$node\", range=\"500\"})", "legendFormat": "500"},
+        {"expr": "sum(ergo_mailbox_depth_distribution{node=~\"$node\", range=\"100\"})", "legendFormat": "100"},
+        {"expr": "sum(ergo_mailbox_depth_distribution{node=~\"$node\", range=\"50\"})", "legendFormat": "50"},
+        {"expr": "sum(ergo_mailbox_depth_distribution{node=~\"$node\", range=\"10\"})", "legendFormat": "10"},
+        {"expr": "sum(ergo_mailbox_depth_distribution{node=~\"$node\", range=\"5\"})", "legendFormat": "5"},
+        {"expr": "sum(ergo_mailbox_depth_distribution{node=~\"$node\", range=\"1\"})", "legendFormat": "1"}
+      ],
+      "fieldConfig": {
+        "defaults": {"custom": {"stacking": {"mode": "normal"}, "fillOpacity": 80, "lineWidth": 0, "lineInterpolation": "smooth"}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "10K+"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#8B0000"}}]},
+          {"matcher": {"id": "byName", "options": "10K"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#E02F44"}}]},
+          {"matcher": {"id": "byName", "options": "5K"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#F2495C"}}]},
+          {"matcher": {"id": "byName", "options": "1K"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#FF7835"}}]},
+          {"matcher": {"id": "byName", "options": "500"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#FF9830"}}]},
+          {"matcher": {"id": "byName", "options": "100"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#F2CC0C"}}]},
+          {"matcher": {"id": "byName", "options": "50"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#FADE2A"}}]},
+          {"matcher": {"id": "byName", "options": "10"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#B5CE3E"}}]},
+          {"matcher": {"id": "byName", "options": "5"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#96D98D"}}]},
+          {"matcher": {"id": "byName", "options": "1"}, "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "#73BF69"}}]}
+        ]
+      },
+      "options": {"legend": {"displayMode": "table", "placement": "right"}}
+    },
+    {
+      "id": 73,
+      "title": "Top Processes by Depth",
+      "type": "table",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 34},
+      "targets": [{
+        "expr": "topk(50, ergo_mailbox_depth_top{node=~\"$node\"})",
+        "format": "table",
+        "instant": true
+      }],
+      "transformations": [
+        {"id": "organize", "options": {
+          "excludeByName": {"Time": true, "__name__": true},
+          "indexByName": {
+            "application": 0,
+            "behavior": 1,
+            "name": 2,
+            "pid": 3,
+            "node": 4,
+            "Value": 5,
+            "pod": 6,
+            "container": 7,
+            "cluster": 8,
+            "service": 9
           },
-          "options": {"legend": {"displayMode": "table", "placement": "right"}}
-        },
-        {
-          "id": 73,
-          "title": "Top Processes by Depth",
-          "type": "table",
-          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 34},
-          "targets": [{
-            "expr": "topk(50, ergo_mailbox_depth_top{node=~\"$node\"})",
-            "format": "table",
-            "instant": true
-          }],
-          "transformations": [
-            {"id": "organize", "options": {
-              "excludeByName": {"Time": true, "__name__": true},
-              "indexByName": {
-                "application": 0,
-                "behavior": 1,
-                "name": 2,
-                "pid": 3,
-                "node": 4,
-                "Value": 5,
-                "pod": 6,
-                "container": 7,
-                "cluster": 8,
-                "service": 9
-              },
-              "renameByName": {
-                "application": "Application",
-                "behavior": "Behavior",
-                "name": "Name",
-                "pid": "PID",
-                "node": "Node",
-                "Value": "Depth",
-                "pod": "Pod",
-                "container": "Container",
-                "cluster": "Cluster",
-                "service": "Service"
-              }
-            }},
-            {"id": "sortBy", "options": {"fields": {}, "sort": [{"field": "Depth", "desc": true}]}}
-          ]
-        }
+          "renameByName": {
+            "application": "Application",
+            "behavior": "Behavior",
+            "name": "Name",
+            "pid": "PID",
+            "node": "Node",
+            "Value": "Depth",
+            "pod": "Pod",
+            "container": "Container",
+            "cluster": "Cluster",
+            "service": "Service"
+          }
+        }},
+        {"id": "sortBy", "options": {"fields": {}, "sort": [{"field": "Depth", "desc": true}]}}
       ]
     },
 
@@ -298,13 +296,13 @@
       "type": "row",
       "title": "Process Activity",
       "collapsed": true,
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 26},
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 42},
       "panels": [
         {
           "id": 81,
           "title": "Utilization Distribution",
           "type": "timeseries",
-          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 27},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 43},
           "targets": [
             {"expr": "sum(ergo_process_utilization_distribution{node=~\"$node\", range=\"90%+\"})", "legendFormat": "90%+"},
             {"expr": "sum(ergo_process_utilization_distribution{node=~\"$node\", range=\"90%\"})", "legendFormat": "90%"},
@@ -334,7 +332,7 @@
           "id": 82,
           "title": "Message Throughput per Node",
           "type": "timeseries",
-          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 27},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 43},
           "targets": [
             {"expr": "rate(ergo_process_messages_in{node=~\"$node\"}[5m])", "legendFormat": "{{node}} in"},
             {"expr": "rate(ergo_process_messages_out{node=~\"$node\"}[5m])", "legendFormat": "{{node}} out"}
@@ -346,7 +344,7 @@
           "id": 83,
           "title": "Top Processes by Utilization",
           "type": "table",
-          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 35},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 51},
           "targets": [{
             "expr": "topk(50, ergo_process_utilization_top{node=~\"$node\"})",
             "format": "table",
@@ -392,7 +390,7 @@
           "id": 84,
           "title": "Actor Running Time per Node",
           "type": "timeseries",
-          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 35},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 51},
           "targets": [
             {"expr": "rate(ergo_process_running_time_seconds{node=~\"$node\"}[5m])", "legendFormat": "{{node}}"}
           ],
@@ -407,13 +405,13 @@
       "type": "row",
       "title": "Processes",
       "collapsed": true,
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 27},
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 43},
       "panels": [
         {
           "id": 10,
           "title": "Processes (total)",
           "type": "timeseries",
-          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 28},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 44},
           "targets": [
             {"expr": "ergo_processes_total{node=~\"$node\"}", "legendFormat": "{{node}}"}
           ],
@@ -424,7 +422,7 @@
           "id": 11,
           "title": "Processes (running)",
           "type": "timeseries",
-          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 28},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 44},
           "targets": [
             {"expr": "ergo_processes_running{node=~\"$node\"}", "legendFormat": "{{node}}"}
           ],
@@ -435,7 +433,7 @@
           "id": 14,
           "title": "Process Spawn Rate",
           "type": "timeseries",
-          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 36},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 52},
           "targets": [
             {"expr": "rate(ergo_processes_spawned_total{node=~\"$node\"}[1m])", "legendFormat": "{{node}} spawned"},
             {"expr": "rate(ergo_processes_spawn_failed_total{node=~\"$node\"}[1m])", "legendFormat": "{{node}} failed"}
@@ -451,7 +449,7 @@
           "id": 15,
           "title": "Process Termination Rate",
           "type": "timeseries",
-          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 36},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 52},
           "targets": [
             {"expr": "rate(ergo_processes_terminated_total{node=~\"$node\"}[1m])", "legendFormat": "{{node}} terminated"}
           ],
@@ -462,126 +460,146 @@
     },
 
     {
-      "id": 20,
-      "title": "CPU User Time per Node",
-      "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 28},
-      "targets": [
-        {"expr": "rate(ergo_cpu_user_seconds{node=~\"$node\"}[1m]) / on(node) ergo_cpu_cores", "legendFormat": "{{node}} user"}
-      ],
-      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}}},
-      "options": {"legend": {"displayMode": "table", "placement": "right"}}
+      "id": 90,
+      "type": "row",
+      "title": "Resources",
+      "collapsed": true,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 44},
+      "panels": [
+        {
+          "id": 20,
+          "title": "CPU User Time per Node",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 45},
+          "targets": [
+            {"expr": "rate(ergo_cpu_user_seconds{node=~\"$node\"}[1m]) / on(node) ergo_cpu_cores", "legendFormat": "{{node}} user"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}}},
+          "options": {"legend": {"displayMode": "table", "placement": "right"}}
+        },
+        {
+          "id": 21,
+          "title": "CPU System Time per Node",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 45},
+          "targets": [
+            {"expr": "rate(ergo_cpu_system_seconds{node=~\"$node\"}[1m]) / on(node) ergo_cpu_cores", "legendFormat": "{{node}} system"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}}},
+          "options": {"legend": {"displayMode": "table", "placement": "right"}}
+        },
+        {
+          "id": 12,
+          "title": "Memory (OS:used)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 53},
+          "targets": [
+            {"expr": "ergo_memory_used_bytes{node=~\"$node\"}", "legendFormat": "{{node}}"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "bytes", "custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}}},
+          "options": {"legend": {"displayMode": "table", "placement": "right"}}
+        },
+        {
+          "id": 13,
+          "title": "Memory (Runtime:alloc)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 53},
+          "targets": [
+            {"expr": "ergo_memory_alloc_bytes{node=~\"$node\"}", "legendFormat": "{{node}}"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "bytes", "custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}}},
+          "options": {"legend": {"displayMode": "table", "placement": "right"}}
+        }
+      ]
     },
+
     {
-      "id": 21,
-      "title": "CPU System Time per Node",
-      "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 28},
-      "targets": [
-        {"expr": "rate(ergo_cpu_system_seconds{node=~\"$node\"}[1m]) / on(node) ergo_cpu_cores", "legendFormat": "{{node}} system"}
-      ],
-      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}}},
-      "options": {"legend": {"displayMode": "table", "placement": "right"}}
+      "id": 91,
+      "type": "row",
+      "title": "Network",
+      "collapsed": true,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 45},
+      "panels": [
+        {
+          "id": 30,
+          "title": "Network Messages (Cluster Total)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 46},
+          "targets": [
+            {"expr": "sum(rate(ergo_remote_messages_in_total[1m]))", "legendFormat": "\u2190 In"},
+            {"expr": "sum(rate(ergo_remote_messages_out_total[1m]))", "legendFormat": "\u2192 Out"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "msg/s", "custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}}},
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+        },
+        {
+          "id": 31,
+          "title": "Network Traffic (Cluster Total)",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 46},
+          "targets": [
+            {"expr": "sum(rate(ergo_remote_bytes_in_total[1m]))", "legendFormat": "\u2190 In"},
+            {"expr": "sum(rate(ergo_remote_bytes_out_total[1m]))", "legendFormat": "\u2192 Out"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "Bps", "custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}}},
+          "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+        },
+        {
+          "id": 32,
+          "title": "Network Messages per Node",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 54},
+          "targets": [
+            {"expr": "sum by (node) (rate(ergo_remote_messages_in_total{node=~\"$node\"}[1m]))", "legendFormat": "{{node}} \u2190 in"},
+            {"expr": "sum by (node) (rate(ergo_remote_messages_out_total{node=~\"$node\"}[1m]))", "legendFormat": "{{node}} \u2192 out"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "msg/s", "custom": {"lineInterpolation": "smooth", "lineWidth": 1}}},
+          "options": {"legend": {"displayMode": "table", "placement": "right"}}
+        },
+        {
+          "id": 33,
+          "title": "Network Traffic per Node",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 54},
+          "targets": [
+            {"expr": "sum by (node) (rate(ergo_remote_bytes_in_total{node=~\"$node\"}[1m]))", "legendFormat": "{{node}} \u2190 in"},
+            {"expr": "sum by (node) (rate(ergo_remote_bytes_out_total{node=~\"$node\"}[1m]))", "legendFormat": "{{node}} \u2192 out"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "Bps", "custom": {"lineInterpolation": "smooth", "lineWidth": 1}}},
+          "options": {"legend": {"displayMode": "table", "placement": "right"}}
+        },
+        {
+          "id": 34,
+          "title": "Network Messages Detail",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 62},
+          "targets": [
+            {"expr": "rate(ergo_remote_messages_in_total{node=~\"$node\"}[1m])", "legendFormat": "{{node}} \u2190 {{remote_node}}"},
+            {"expr": "rate(ergo_remote_messages_out_total{node=~\"$node\"}[1m])", "legendFormat": "{{node}} \u2192 {{remote_node}}"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "msg/s", "custom": {"lineInterpolation": "smooth", "lineWidth": 1}}},
+          "options": {"legend": {"displayMode": "table", "placement": "right"}}
+        },
+        {
+          "id": 35,
+          "title": "Network Traffic Detail",
+          "type": "timeseries",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 62},
+          "targets": [
+            {"expr": "rate(ergo_remote_bytes_in_total{node=~\"$node\"}[1m])", "legendFormat": "{{node}} \u2190 {{remote_node}}"},
+            {"expr": "rate(ergo_remote_bytes_out_total{node=~\"$node\"}[1m])", "legendFormat": "{{node}} \u2192 {{remote_node}}"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "Bps", "custom": {"lineInterpolation": "smooth", "lineWidth": 1}}},
+          "options": {"legend": {"displayMode": "table", "placement": "right"}}
+        }
+      ]
     },
-    {
-      "id": 12,
-      "title": "Memory (OS:used)",
-      "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 36},
-      "targets": [
-        {"expr": "ergo_memory_used_bytes{node=~\"$node\"}", "legendFormat": "{{node}}"}
-      ],
-      "fieldConfig": {"defaults": {"unit": "bytes", "custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}}},
-      "options": {"legend": {"displayMode": "table", "placement": "right"}}
-    },
-    {
-      "id": 13,
-      "title": "Memory (Runtime:alloc)",
-      "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 36},
-      "targets": [
-        {"expr": "ergo_memory_alloc_bytes{node=~\"$node\"}", "legendFormat": "{{node}}"}
-      ],
-      "fieldConfig": {"defaults": {"unit": "bytes", "custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}}},
-      "options": {"legend": {"displayMode": "table", "placement": "right"}}
-    },
-    {
-      "id": 30,
-      "title": "Network Messages (Cluster Total)",
-      "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 44},
-      "targets": [
-        {"expr": "sum(rate(ergo_remote_messages_in_total[1m]))", "legendFormat": "\u2190 In"},
-        {"expr": "sum(rate(ergo_remote_messages_out_total[1m]))", "legendFormat": "\u2192 Out"}
-      ],
-      "fieldConfig": {"defaults": {"unit": "msg/s", "custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}}},
-      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
-    },
-    {
-      "id": 31,
-      "title": "Network Traffic (Cluster Total)",
-      "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 44},
-      "targets": [
-        {"expr": "sum(rate(ergo_remote_bytes_in_total[1m]))", "legendFormat": "\u2190 In"},
-        {"expr": "sum(rate(ergo_remote_bytes_out_total[1m]))", "legendFormat": "\u2192 Out"}
-      ],
-      "fieldConfig": {"defaults": {"unit": "Bps", "custom": {"lineInterpolation": "smooth", "fillOpacity": 20, "gradientMode": "opacity"}}},
-      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
-    },
-    {
-      "id": 32,
-      "title": "Network Messages per Node",
-      "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 52},
-      "targets": [
-        {"expr": "sum by (node) (rate(ergo_remote_messages_in_total{node=~\"$node\"}[1m]))", "legendFormat": "{{node}} \u2190 in"},
-        {"expr": "sum by (node) (rate(ergo_remote_messages_out_total{node=~\"$node\"}[1m]))", "legendFormat": "{{node}} \u2192 out"}
-      ],
-      "fieldConfig": {"defaults": {"unit": "msg/s", "custom": {"lineInterpolation": "smooth", "lineWidth": 1}}},
-      "options": {"legend": {"displayMode": "table", "placement": "right"}}
-    },
-    {
-      "id": 33,
-      "title": "Network Traffic per Node",
-      "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 52},
-      "targets": [
-        {"expr": "sum by (node) (rate(ergo_remote_bytes_in_total{node=~\"$node\"}[1m]))", "legendFormat": "{{node}} \u2190 in"},
-        {"expr": "sum by (node) (rate(ergo_remote_bytes_out_total{node=~\"$node\"}[1m]))", "legendFormat": "{{node}} \u2192 out"}
-      ],
-      "fieldConfig": {"defaults": {"unit": "Bps", "custom": {"lineInterpolation": "smooth", "lineWidth": 1}}},
-      "options": {"legend": {"displayMode": "table", "placement": "right"}}
-    },
-    {
-      "id": 34,
-      "title": "Network Messages Detail",
-      "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 60},
-      "targets": [
-        {"expr": "rate(ergo_remote_messages_in_total{node=~\"$node\"}[1m])", "legendFormat": "{{node}} \u2190 {{remote_node}}"},
-        {"expr": "rate(ergo_remote_messages_out_total{node=~\"$node\"}[1m])", "legendFormat": "{{node}} \u2192 {{remote_node}}"}
-      ],
-      "fieldConfig": {"defaults": {"unit": "msg/s", "custom": {"lineInterpolation": "smooth", "lineWidth": 1}}},
-      "options": {"legend": {"displayMode": "table", "placement": "right"}}
-    },
-    {
-      "id": 35,
-      "title": "Network Traffic Detail",
-      "type": "timeseries",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 60},
-      "targets": [
-        {"expr": "rate(ergo_remote_bytes_in_total{node=~\"$node\"}[1m])", "legendFormat": "{{node}} \u2190 {{remote_node}}"},
-        {"expr": "rate(ergo_remote_bytes_out_total{node=~\"$node\"}[1m])", "legendFormat": "{{node}} \u2192 {{remote_node}}"}
-      ],
-      "fieldConfig": {"defaults": {"unit": "Bps", "custom": {"lineInterpolation": "smooth", "lineWidth": 1}}},
-      "options": {"legend": {"displayMode": "table", "placement": "right"}}
-    },
+
     {
       "id": 40,
       "title": "Nodes Overview",
       "type": "table",
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 68},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 46},
       "targets": [
         {"expr": "ergo_node_uptime_seconds{node=~\"$node\"}", "format": "table", "instant": true},
         {"expr": "ergo_processes_total{node=~\"$node\"}", "format": "table", "instant": true},

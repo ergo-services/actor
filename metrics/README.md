@@ -148,11 +148,11 @@ func (m *MyMetrics) CollectMetrics() error {
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
 | `ergo_connected_nodes_total` | Gauge | - | Total connected nodes |
-| `ergo_remote_node_uptime_seconds` | Gauge | node | Remote node uptime |
-| `ergo_remote_messages_in_total` | Gauge | node | Messages received from node |
-| `ergo_remote_messages_out_total` | Gauge | node | Messages sent to node |
-| `ergo_remote_bytes_in_total` | Gauge | node | Bytes received from node |
-| `ergo_remote_bytes_out_total` | Gauge | node | Bytes sent to node |
+| `ergo_remote_node_uptime_seconds` | Gauge | remote_node | Remote node uptime |
+| `ergo_remote_messages_in_total` | Gauge | remote_node | Messages received from node |
+| `ergo_remote_messages_out_total` | Gauge | remote_node | Messages sent to node |
+| `ergo_remote_bytes_in_total` | Gauge | remote_node | Bytes received from node |
+| `ergo_remote_bytes_out_total` | Gauge | remote_node | Bytes sent to node |
 
 ### Mailbox Latency Metrics
 
@@ -336,51 +336,7 @@ Six stat panels showing aggregated values for selected nodes:
 - **Memory Alloc** -- total runtime memory allocated across selected nodes. A significant difference between Used and Alloc may indicate memory fragmentation or that the runtime is holding memory that could be released
 - **Total Nodes** -- number of nodes matching the filter. Useful for quickly detecting if a node has left the cluster unexpectedly
 
-#### Processes (collapsed row)
-
-A collapsed row containing four timeseries graphs. Click to expand.
-
-- **Processes (total)** -- total process count per node. Steady growth without a plateau may indicate a process leak (processes being spawned but never terminated)
-- **Processes (running)** -- running process count per node. Helps identify load distribution across the cluster -- uneven running counts may point to hotspot nodes
-- **Process Spawn Rate** -- rate of successfully spawned processes per node. Also shows failed spawn attempts (in red). Spawn failures indicate resource exhaustion or configuration errors. A sudden spike in spawn rate may signal a restart loop
-- **Process Termination Rate** -- rate of terminated processes per node. When termination rate consistently exceeds spawn rate, the node is draining. When spawn rate exceeds termination rate, process count is growing -- correlate with the Processes panel to verify
-
-#### CPU
-
-Two timeseries graphs showing CPU utilization normalized by core count:
-
-- **CPU User Time per Node** -- user CPU time percentage per node. High user CPU indicates the application logic is compute-bound. Useful for identifying nodes that need horizontal scaling
-- **CPU System Time per Node** -- system CPU time percentage per node. High system CPU relative to user CPU suggests excessive syscalls, context switching, or I/O pressure rather than application workload
-
-#### Memory
-
-Two timeseries graphs showing memory usage over time:
-
-- **Memory (OS:used)** -- OS-reported memory used per node. Monotonic growth over time is a strong indicator of a memory leak. Compare across nodes to spot outliers
-- **Memory (Runtime:alloc)** -- Go runtime allocated memory per node. Sawtooth pattern is normal (allocation followed by GC). Flat or steadily rising baseline between GC cycles points to objects that are not being collected
-
-#### Network (Cluster Total)
-
-Two timeseries graphs showing cluster-wide network activity:
-
-- **Network Messages (Cluster Total)** -- total inbound and outbound message rate across all nodes. Provides a high-level view of cluster communication intensity. Sudden drops may indicate network partitions or node failures
-- **Network Traffic (Cluster Total)** -- total inbound and outbound byte rate across all nodes. Helps estimate bandwidth requirements. A growing gap between message rate and byte rate means average message size is changing
-
-#### Network (Per Node)
-
-Two timeseries graphs showing network activity broken down by node:
-
-- **Network Messages per Node** -- inbound and outbound message rate per node. Helps identify which nodes are communication hotspots and whether traffic is evenly distributed
-- **Network Traffic per Node** -- inbound and outbound byte rate per node. Nodes with disproportionately high byte rate relative to message rate are sending larger payloads -- useful for identifying nodes that transfer bulk data
-
-#### Network (Detail)
-
-Two timeseries graphs showing network activity between specific node pairs:
-
-- **Network Messages Detail** -- message rate between each pair of connected nodes. Helps trace specific inter-node communication paths and detect unexpected or missing connections
-- **Network Traffic Detail** -- byte rate between each pair of connected nodes. Useful for identifying which specific node-to-node link is saturated or carrying the most data
-
-#### Mailbox Latency (requires `-tags=latency`)
+#### Mailbox Latency (expanded row, requires `-tags=latency`)
 
 An expanded row that appears right after the Summary. Only useful when the application is built with `-tags=latency`. When the tag is not used, these panels will show "No data".
 
@@ -414,14 +370,14 @@ One table panel:
 
 **Dig deeper:**
 
-1. **Identify the node.** Check Max Latency per Node and Stressed Processes per Node. If one node stands out while others are calm, the problem is localized -- look at that node's CPU, memory, and network panels
+1. **Identify the node.** Check Max Latency per Node and Stressed Processes per Node. If one node stands out while others are calm, the problem is localized -- look at that node's Resources and Network panels
 2. **Identify the process.** Open the Top Stressed Processes table. The columns Application, Behavior, and Name tell you exactly what kind of actor is struggling. Multiple processes from the same application suggest the application itself is under pressure. A single process with extreme latency is likely stuck or blocked
 3. **Understand the distribution.** The Latency Distribution panel shows whether the problem is isolated (one red sliver at the top of an otherwise green chart) or systemic (the entire chart shifting from green toward orange/red over time). A systemic shift means the node is overloaded and needs either scaling or load shedding
 4. **Correlate with other panels.** High latency combined with high CPU suggests compute-bound processes. High latency with low CPU suggests processes are blocked on external I/O or waiting for responses from other actors. High latency with growing memory may indicate unbounded mailbox accumulation
 
-#### Mailbox Depth (collapsed row)
+#### Mailbox Depth (expanded row)
 
-A collapsed row containing three panels. Click to expand. Shows how many messages are currently queued in process mailboxes. Complementary to latency -- depth tells you "how many", latency tells you "how long".
+Three panels showing how many messages are currently queued in process mailboxes. Complementary to latency -- depth tells you "how many", latency tells you "how long".
 
 - **Max Depth per Node** -- maximum mailbox queue depth per node over time. A growing value means at least one process is accumulating messages faster than it can process them. Compare with the latency Max Latency panel -- high depth with low latency means the process handles messages quickly but receives many; high depth with high latency means it is falling behind
 - **Depth Distribution** -- stacked area chart showing how many processes fall into each depth range over time. Uses a flame color gradient: green tones for low depth (1-10 messages), yellow for moderate (50-100), orange for high (500-1K), red for critical (5K-10K+). In a healthy system most processes should have low depth. A shift toward red indicates growing backpressure
@@ -435,6 +391,35 @@ A collapsed row containing four panels. Click to expand. Shows process utilizati
 - **Message Throughput per Node** -- message rate per node showing `rate(ergo_process_messages_in)` and `rate(ergo_process_messages_out)`. Unit: messages per second. Provides a node-level view of how much work is flowing through the system. A sudden drop may indicate stalled processes; a spike may precede latency increases
 - **Top Processes by Utilization** -- table showing the busiest processes by lifetime utilization across the cluster. Values are displayed as percentages. Helps identify actors that consume the most CPU time relative to their existence. A process at 90%+ utilization is almost always busy and may benefit from load distribution
 - **Actor Running Time per Node** -- `rate(ergo_process_running_time_seconds)` per node, showing how many seconds of callback execution are happening per second across all processes on each node. Effectively a node-level CPU utilization metric for actor callbacks. When this value approaches the number of available CPU cores, the node is compute-saturated
+
+#### Processes (collapsed row)
+
+A collapsed row containing four timeseries graphs. Click to expand.
+
+- **Processes (total)** -- total process count per node. Steady growth without a plateau may indicate a process leak (processes being spawned but never terminated)
+- **Processes (running)** -- running process count per node. Helps identify load distribution across the cluster -- uneven running counts may point to hotspot nodes
+- **Process Spawn Rate** -- rate of successfully spawned processes per node. Also shows failed spawn attempts (in red). Spawn failures indicate resource exhaustion or configuration errors. A sudden spike in spawn rate may signal a restart loop
+- **Process Termination Rate** -- rate of terminated processes per node. When termination rate consistently exceeds spawn rate, the node is draining. When spawn rate exceeds termination rate, process count is growing -- correlate with the Processes panel to verify
+
+#### Resources (collapsed row)
+
+A collapsed row containing four timeseries graphs. Click to expand.
+
+- **CPU User Time per Node** -- user CPU time percentage per node, normalized by core count. High user CPU indicates the application logic is compute-bound. Useful for identifying nodes that need horizontal scaling
+- **CPU System Time per Node** -- system CPU time percentage per node, normalized by core count. High system CPU relative to user CPU suggests excessive syscalls, context switching, or I/O pressure rather than application workload
+- **Memory (OS:used)** -- OS-reported memory used per node. Monotonic growth over time is a strong indicator of a memory leak. Compare across nodes to spot outliers
+- **Memory (Runtime:alloc)** -- Go runtime allocated memory per node. Sawtooth pattern is normal (allocation followed by GC). Flat or steadily rising baseline between GC cycles points to objects that are not being collected
+
+#### Network (collapsed row)
+
+A collapsed row containing six timeseries graphs. Click to expand. Shows cluster-wide totals, per-node breakdowns, and node-pair detail for both message rates and byte rates.
+
+- **Network Messages (Cluster Total)** -- total inbound and outbound message rate across all nodes. Provides a high-level view of cluster communication intensity. Sudden drops may indicate network partitions or node failures
+- **Network Traffic (Cluster Total)** -- total inbound and outbound byte rate across all nodes. Helps estimate bandwidth requirements. A growing gap between message rate and byte rate means average message size is changing
+- **Network Messages per Node** -- inbound and outbound message rate per node. Helps identify which nodes are communication hotspots and whether traffic is evenly distributed
+- **Network Traffic per Node** -- inbound and outbound byte rate per node. Nodes with disproportionately high byte rate relative to message rate are sending larger payloads -- useful for identifying nodes that transfer bulk data
+- **Network Messages Detail** -- message rate between each pair of connected nodes. Helps trace specific inter-node communication paths and detect unexpected or missing connections
+- **Network Traffic Detail** -- byte rate between each pair of connected nodes. Useful for identifying which specific node-to-node link is saturated or carrying the most data
 
 #### Nodes Overview
 
