@@ -36,6 +36,12 @@ type latencyMetrics struct {
 	maxLatency    prometheus.Gauge
 	stressedCount prometheus.Gauge
 	topLatency    *prometheus.GaugeVec
+
+	// per-cycle accumulators
+	maxLat   float64
+	stressed float64
+	buckets  []float64
+	heap     *topNHeap
 }
 
 func (lm *latencyMetrics) init(registry *prometheus.Registry, nodeLabels prometheus.Labels) {
@@ -77,67 +83,64 @@ func (lm *latencyMetrics) init(registry *prometheus.Registry, nodeLabels prometh
 	)
 }
 
-func (lm *latencyMetrics) collect(node gen.Node, topN int) {
-	var maxLat float64
-	var stressed float64
-	h := &topNHeap{}
+func (lm *latencyMetrics) begin() {
+	lm.maxLat = 0
+	lm.stressed = 0
+	lm.buckets = make([]float64, len(latencyBoundaries)+1)
+	lm.heap = &topNHeap{}
+}
 
-	// bucket counters: one per boundary + one for >max boundary
-	buckets := make([]float64, len(latencyBoundaries)+1)
+func (lm *latencyMetrics) observe(info gen.ProcessShortInfo, topN int) {
+	if info.MailboxLatency <= 0 {
+		return
+	}
 
-	node.ProcessRangeShortInfo(func(info gen.ProcessShortInfo) bool {
-		if info.MailboxLatency <= 0 {
-			return true
+	seconds := float64(info.MailboxLatency) / 1e9
+	lm.stressed++
+
+	if seconds > lm.maxLat {
+		lm.maxLat = seconds
+	}
+
+	// find bucket for this latency
+	placed := false
+	for i, boundary := range latencyBoundaries {
+		if seconds <= boundary {
+			lm.buckets[i]++
+			placed = true
+			break
 		}
+	}
+	if placed == false {
+		lm.buckets[len(latencyBoundaries)]++ // >60s
+	}
 
-		seconds := float64(info.MailboxLatency) / 1e9
-		stressed++
+	entry := topNEntry{
+		seconds:     seconds,
+		pid:         info.PID.String(),
+		name:        string(info.Name),
+		application: string(info.Application),
+		behavior:    info.Behavior,
+	}
 
-		if seconds > maxLat {
-			maxLat = seconds
-		}
+	if lm.heap.Len() < topN {
+		heap.Push(lm.heap, entry)
+	} else if seconds > (*lm.heap)[0].seconds {
+		(*lm.heap)[0] = entry
+		heap.Fix(lm.heap, 0)
+	}
+}
 
-		// find bucket for this latency
-		placed := false
-		for i, boundary := range latencyBoundaries {
-			if seconds <= boundary {
-				buckets[i]++
-				placed = true
-				break
-			}
-		}
-		if placed == false {
-			buckets[len(latencyBoundaries)]++ // >60s
-		}
+func (lm *latencyMetrics) flush() {
+	lm.maxLatency.Set(lm.maxLat)
+	lm.stressedCount.Set(lm.stressed)
 
-		entry := topNEntry{
-			seconds:     seconds,
-			pid:         info.PID.String(),
-			name:        string(info.Name),
-			application: string(info.Application),
-			behavior:    info.Behavior,
-		}
-
-		if h.Len() < topN {
-			heap.Push(h, entry)
-		} else if seconds > (*h)[0].seconds {
-			(*h)[0] = entry
-			heap.Fix(h, 0)
-		}
-
-		return true
-	})
-
-	lm.maxLatency.Set(maxLat)
-	lm.stressedCount.Set(stressed)
-
-	// update distribution gauges
 	for i, label := range latencyRangeLabels {
-		lm.distribution.WithLabelValues(label).Set(buckets[i])
+		lm.distribution.WithLabelValues(label).Set(lm.buckets[i])
 	}
 
 	lm.topLatency.Reset()
-	for _, e := range *h {
+	for _, e := range *lm.heap {
 		lm.topLatency.WithLabelValues(
 			e.pid,
 			e.name,

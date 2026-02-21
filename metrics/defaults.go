@@ -6,5 +6,5 @@ const (
 	DefaultPort            = 3000
 	DefaultHost            = "localhost"
 	DefaultCollectInterval = 10 * time.Second
-	DefaultLatencyTopN     = 50
+	DefaultTopN            = 50
 )

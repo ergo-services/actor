@@ -6,5 +6,5 @@ type Options struct {
 	Port            uint16
 	Host            string
 	CollectInterval time.Duration
-	LatencyTopN     int
+	TopN            int
 }

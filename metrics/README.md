@@ -47,7 +47,7 @@ options := metrics.Options{
     Host:            "0.0.0.0",           // Listen address
     Port:            9090,                 // HTTP port
     CollectInterval: 5 * time.Second,     // Collection frequency
-    LatencyTopN:     50,                   // Top-N processes by mailbox latency
+    TopN:            50,                   // Top-N processes for each metric group
 }
 
 n.Spawn(metrics.Factory, gen.ProcessOptions{}, options)
@@ -58,7 +58,7 @@ n.Spawn(metrics.Factory, gen.ProcessOptions{}, options)
 - **Port**: 3000
 - **Host**: localhost
 - **CollectInterval**: 10 seconds
-- **LatencyTopN**: 50
+- **TopN**: 50
 
 ## Extending with Custom Metrics
 
@@ -177,14 +177,6 @@ Distribution ranges: 1ms, 5ms, 10ms, 50ms, 100ms, 500ms, 1s, 5s, 10s, 30s, 60s, 
 
 Each range represents an upper boundary. For example, "5ms" counts processes with latency between 1ms and 5ms. The "60s+" range counts processes with latency above 60 seconds. Values are snapshots -- each collect cycle counts from scratch, so values reflect the current state, not cumulative history.
 
-#### Cardinality
-
-For a cluster of 500 nodes with `LatencyTopN=50`:
-- Distribution: 500 x 12 series = 6,000
-- Max + Count gauges: 500 x 2 = 1,000
-- Top-N gauges: 500 x 50 = 25,000
-- Total: ~32,000 series
-
 #### Grafana Queries
 
 Latency distribution across the cluster (stacked timeseries):
@@ -208,6 +200,68 @@ Alert when any process has latency above 1 second:
 ```promql
 ergo_mailbox_latency_max_seconds > 1
 ```
+
+### Mailbox Depth Metrics
+
+The metrics actor automatically collects per-process mailbox queue depth -- the number of messages waiting in the mailbox at the moment of collection. This is complementary to latency: latency measures how long the oldest message has been waiting, while depth measures how many messages are queued.
+
+No build tags required. Depth metrics are always active.
+
+#### Depth Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `ergo_mailbox_depth_distribution` | Gauge | range | Number of processes in each depth range (snapshot per collect cycle) |
+| `ergo_mailbox_depth_max` | Gauge | - | Maximum mailbox depth across all processes on this node |
+| `ergo_mailbox_depth_top` | Gauge | pid, name, application, behavior | Top-N processes by mailbox depth |
+
+Distribution ranges: 1, 5, 10, 50, 100, 500, 1K, 5K, 10K, 10K+.
+
+Each range represents an upper boundary. For example, "5" counts processes with 2 to 5 messages in the mailbox. Processes with empty mailboxes are not counted.
+
+### Process Utilization Metrics
+
+The metrics actor collects per-process utilization -- the ratio of callback running time to process uptime. This is a lifetime average that shows which actors have spent the most time executing callbacks relative to their total existence.
+
+No build tags required. Utilization metrics are always active.
+
+#### Utilization Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `ergo_process_utilization_distribution` | Gauge | range | Number of processes in each utilization range (snapshot per collect cycle) |
+| `ergo_process_utilization_max` | Gauge | - | Maximum process utilization on this node |
+| `ergo_process_utilization_top` | Gauge | pid, name, application, behavior | Top-N processes by utilization |
+
+Distribution ranges: 1%, 5%, 10%, 25%, 50%, 75%, 90%, 90%+.
+
+Utilization is computed as `RunningTime / Uptime`. A value of 0.50 means the process has spent 50% of its lifetime executing callbacks. The remaining time was spent waiting for messages. Processes with zero running time or zero uptime are excluded.
+
+### Process Aggregate Metrics
+
+Node-level aggregate counters computed as the sum of per-process values across all processes on the node. These are cumulative values -- use `rate()` in Prometheus/Grafana to get per-second throughput.
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `ergo_process_messages_in` | Gauge | Sum of messages received by all processes on this node |
+| `ergo_process_messages_out` | Gauge | Sum of messages sent by all processes on this node |
+| `ergo_process_running_time_seconds` | Gauge | Sum of callback running time across all processes on this node (seconds) |
+
+These values are sums of per-process cumulative counters. When a process terminates, its contribution is removed, which may cause the aggregate to decrease. This is expected -- `rate()` handles it correctly in most cases, though short-lived process churn may produce minor artifacts.
+
+#### Cardinality
+
+All per-process metrics (depth, utilization, latency) share the same `TopN` setting. For a cluster of 500 nodes with `TopN=50`:
+
+- Depth distribution: 500 x 10 = 5,000
+- Depth max + top-N: 500 x (1 + 50) = 25,500
+- Utilization distribution: 500 x 8 = 4,000
+- Utilization max + top-N: 500 x (1 + 50) = 25,500
+- Latency distribution: 500 x 12 = 6,000 (with `-tags=latency`)
+- Latency max + count + top-N: 500 x (2 + 50) = 26,000 (with `-tags=latency`)
+- Aggregates: 500 x 3 = 1,500
+- Total (without latency): ~61,500 series
+- Total (with latency): ~93,500 series
 
 ## Observer Integration
 
@@ -364,6 +418,23 @@ One table panel:
 2. **Identify the process.** Open the Top Stressed Processes table. The columns Application, Behavior, and Name tell you exactly what kind of actor is struggling. Multiple processes from the same application suggest the application itself is under pressure. A single process with extreme latency is likely stuck or blocked
 3. **Understand the distribution.** The Latency Distribution panel shows whether the problem is isolated (one red sliver at the top of an otherwise green chart) or systemic (the entire chart shifting from green toward orange/red over time). A systemic shift means the node is overloaded and needs either scaling or load shedding
 4. **Correlate with other panels.** High latency combined with high CPU suggests compute-bound processes. High latency with low CPU suggests processes are blocked on external I/O or waiting for responses from other actors. High latency with growing memory may indicate unbounded mailbox accumulation
+
+#### Mailbox Depth (collapsed row)
+
+A collapsed row containing three panels. Click to expand. Shows how many messages are currently queued in process mailboxes. Complementary to latency -- depth tells you "how many", latency tells you "how long".
+
+- **Max Depth per Node** -- maximum mailbox queue depth per node over time. A growing value means at least one process is accumulating messages faster than it can process them. Compare with the latency Max Latency panel -- high depth with low latency means the process handles messages quickly but receives many; high depth with high latency means it is falling behind
+- **Depth Distribution** -- stacked area chart showing how many processes fall into each depth range over time. Uses a flame color gradient: green tones for low depth (1-10 messages), yellow for moderate (50-100), orange for high (500-1K), red for critical (5K-10K+). In a healthy system most processes should have low depth. A shift toward red indicates growing backpressure
+- **Top Processes by Depth** -- table showing processes with the deepest mailbox queues across the cluster. Columns: Application, Behavior, Name, PID, Node, Depth (plus Kubernetes labels when available). Sorted by depth descending. Use this to identify which actors are accumulating the most messages
+
+#### Process Activity (collapsed row)
+
+A collapsed row containing four panels. Click to expand. Shows process utilization, message throughput, and running time.
+
+- **Utilization Distribution** -- stacked area chart showing how many processes fall into each utilization range over time. Utilization is `RunningTime / Uptime` -- the fraction of a process lifetime spent executing callbacks. Uses a flame color gradient: green for low utilization (1%-10%), yellow for moderate (25%-50%), orange/red for high (75%-90%+). In most systems the majority of processes should be in the low ranges. A shift toward higher ranges indicates increasing compute load
+- **Message Throughput per Node** -- message rate per node showing `rate(ergo_process_messages_in)` and `rate(ergo_process_messages_out)`. Unit: messages per second. Provides a node-level view of how much work is flowing through the system. A sudden drop may indicate stalled processes; a spike may precede latency increases
+- **Top Processes by Utilization** -- table showing the busiest processes by lifetime utilization across the cluster. Values are displayed as percentages. Helps identify actors that consume the most CPU time relative to their existence. A process at 90%+ utilization is almost always busy and may benefit from load distribution
+- **Actor Running Time per Node** -- `rate(ergo_process_running_time_seconds)` per node, showing how many seconds of callback execution are happening per second across all processes on each node. Effectively a node-level CPU utilization metric for actor callbacks. When this value approaches the number of available CPU cores, the node is compute-saturated
 
 #### Nodes Overview
 

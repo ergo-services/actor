@@ -72,6 +72,17 @@ type Actor struct {
 	// Latency metrics (enabled with -tags=latency)
 	latency latencyMetrics
 
+	// Mailbox depth metrics
+	depth depthMetrics
+
+	// Process utilization metrics
+	utilization utilizationMetrics
+
+	// Process aggregate metrics
+	processMessagesIn  prometheus.Gauge
+	processMessagesOut prometheus.Gauge
+	processRunningTime prometheus.Gauge
+
 	// Network metrics
 	connectedNodes    prometheus.Gauge
 	remoteNodeUptime  *prometheus.GaugeVec
@@ -129,8 +140,8 @@ func (a *Actor) ProcessInit(process gen.Process, args ...any) (rr error) {
 	if a.options.CollectInterval < 1 {
 		a.options.CollectInterval = DefaultCollectInterval
 	}
-	if a.options.LatencyTopN < 1 {
-		a.options.LatencyTopN = DefaultLatencyTopN
+	if a.options.TopN < 1 {
+		a.options.TopN = DefaultTopN
 	}
 
 	// Start HTTP server for /metrics endpoint
@@ -284,6 +295,29 @@ func (a *Actor) initializeMetrics() error {
 	// Initialize latency metrics (no-op without -tags=latency)
 	a.latency.init(a.registry, nodeLabels)
 
+	// Initialize mailbox depth metrics
+	a.depth.init(a.registry, nodeLabels)
+
+	// Initialize process utilization metrics
+	a.utilization.init(a.registry, nodeLabels)
+
+	// Process aggregate metrics
+	a.processMessagesIn = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name:        "ergo_process_messages_in",
+		Help:        "Sum of messages received by all processes on this node",
+		ConstLabels: nodeLabels,
+	})
+	a.processMessagesOut = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name:        "ergo_process_messages_out",
+		Help:        "Sum of messages sent by all processes on this node",
+		ConstLabels: nodeLabels,
+	})
+	a.processRunningTime = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name:        "ergo_process_running_time_seconds",
+		Help:        "Sum of callback running time across all processes on this node",
+		ConstLabels: nodeLabels,
+	})
+
 	// Register all base metrics
 	a.registry.MustRegister(
 		a.nodeUptime,
@@ -309,6 +343,9 @@ func (a *Actor) initializeMetrics() error {
 		a.remoteMessagesOut,
 		a.remoteBytesIn,
 		a.remoteBytesOut,
+		a.processMessagesIn,
+		a.processMessagesOut,
+		a.processRunningTime,
 	)
 
 	return nil
@@ -396,8 +433,42 @@ func (a *Actor) collectBaseMetrics() error {
 		a.remoteBytesOut.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.BytesOut))
 	}
 
-	// Collect latency metrics (no-op without -tags=latency)
-	a.latency.collect(a.Node(), a.options.LatencyTopN)
+	// Collect per-process metrics in a single pass
+	a.latency.begin()
+	a.depth.begin()
+	a.utilization.begin()
+
+	var totalMessagesIn uint64
+	var totalMessagesOut uint64
+	var totalRunningTime uint64
+
+	topN := a.options.TopN
+
+	a.Node().ProcessRangeShortInfo(func(info gen.ProcessShortInfo) bool {
+		// Aggregate counters
+		totalMessagesIn += info.MessagesIn
+		totalMessagesOut += info.MessagesOut
+		totalRunningTime += info.RunningTime
+
+		// Mailbox depth metrics
+		a.depth.observe(info, topN)
+
+		// Process utilization metrics
+		a.utilization.observe(info, topN)
+
+		// Latency metrics (no-op without -tags=latency)
+		a.latency.observe(info, topN)
+
+		return true
+	})
+
+	a.depth.flush()
+	a.utilization.flush()
+	a.latency.flush()
+
+	a.processMessagesIn.Set(float64(totalMessagesIn))
+	a.processMessagesOut.Set(float64(totalMessagesOut))
+	a.processRunningTime.Set(float64(totalRunningTime) / 1e9)
 
 	return nil
 }
