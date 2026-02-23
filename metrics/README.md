@@ -142,9 +142,9 @@ func (m *MyMetrics) CollectMetrics() error {
 | `ergo_registered_names_total` | Gauge | Total registered process names |
 | `ergo_registered_aliases_total` | Gauge | Total registered aliases |
 | `ergo_registered_events_total` | Gauge | Total registered events |
-| `ergo_events_published_total` | Gauge | Cumulative number of events published |
-| `ergo_events_local_sent_total` | Gauge | Cumulative number of event messages sent to local subscribers |
-| `ergo_events_remote_sent_total` | Gauge | Cumulative number of event messages sent to remote nodes |
+| `ergo_events_published_total` | Gauge | Cumulative number of events published. Includes both local producer publishes and events arriving from remote nodes |
+| `ergo_events_local_sent_total` | Gauge | Cumulative number of event messages delivered to local subscribers. Reflects actual fanout -- one publish with 100 subscribers produces 100 local deliveries |
+| `ergo_events_remote_sent_total` | Gauge | Cumulative number of event messages sent to remote nodes. Counts one per node, not per subscriber, due to shared subscription optimization |
 
 ### Network Metrics
 
@@ -224,7 +224,7 @@ Each range represents an upper boundary. For example, "5" counts processes with 
 
 ### Event Metrics
 
-The metrics actor collects per-event pub/sub metrics using `Node.EventRangeInfo()`. This provides visibility into which events have the most subscribers and which generate the most delivery load.
+The metrics actor collects per-event pub/sub metrics using `Node.EventRangeInfo()`. This provides visibility into which events have the most subscribers and which generate the most delivery load. The subscriber count for each event includes both `LinkEvent` and `MonitorEvent` subscribers.
 
 No build tags required. Event metrics are always active.
 

@@ -1187,7 +1187,7 @@
               "mode": "multi"
             }
           },
-          "description": "Cluster-wide event publish and delivery rates. Published (blue) shows how often producers publish. Local Delivered (green) shows actual fanout to local subscribers -- typically much higher than Published when events have many subscribers. Remote Sent (orange) counts one message per remote node due to shared subscription optimization. See https://docs.ergo.services/advanced/pub-sub-internals for the delivery model."
+          "description": "Cluster-wide event throughput. Published (blue) shows how often producers publish. Local Delivered (green) shows actual fanout to local subscribers -- one publish with many subscribers produces many deliveries. Remote Sent (orange) counts one message per remote node due to shared subscription optimization. See https://docs.ergo.services/advanced/pub-sub-internals for the delivery model."
         },
         {
           "id": 109,
@@ -1284,7 +1284,7 @@
               "mode": "multi"
             }
           },
-          "description": "Events with wasteful usage patterns. Idle (grey): registered but no publishes and no subscribers -- forgotten event. No Subscribers (orange): publishing into the void, producer not using Notify mechanism. No Publishing (blue): subscribers waiting but producer never publishes. All zeros means healthy pub/sub. See https://docs.ergo.services/basics/events for event lifecycle and Notify."
+          "description": "Events with wasteful usage patterns. Idle (grey): registered but no publishes and no subscribers -- forgotten event. No Subscribers (orange): publishing into the void, producer not using the Notify mechanism to detect absent subscribers. No Publishing (blue): subscribers waiting but producer never publishes. See https://docs.ergo.services/basics/events for event lifecycle and Notify."
         },
         {
           "id": 104,
@@ -1323,7 +1323,7 @@
               "mode": "multi"
             }
           },
-          "description": "Number of registered events per node. A growing count without plateaus may indicate event registration leak -- events being registered but never unregistered or producers not terminating. See https://docs.ergo.services/basics/events for registration/unregistration lifecycle."
+          "description": "Number of registered events per node. Steady growth without plateau may indicate event registration leak -- events being registered but never unregistered."
         },
         {
           "id": 103,
@@ -1362,7 +1362,7 @@
               "mode": "multi"
             }
           },
-          "description": "Maximum subscriber count for any single event on each node. A high value means at least one event has many consumers, which amplifies the cost of each publish due to local fanout. See https://docs.ergo.services/advanced/pub-sub-internals for shared subscription optimization."
+          "description": "Maximum subscriber count for any single event per node. Includes both LinkEvent and MonitorEvent subscribers. A high value amplifies the cost of each publish due to local fanout. See https://docs.ergo.services/advanced/pub-sub-internals for shared subscription optimization."
         },
         {
           "id": 102,
@@ -1567,7 +1567,7 @@
               "placement": "right"
             }
           },
-          "description": "Distribution of events by subscriber count ranging from 0 to 1K+. Shows the shape of pub/sub usage. Green for 0-1 subscribers, yellow-green for 2-10, orange for 11-100, red for 101-1K+. A shift toward higher ranges indicates growing pub/sub complexity."
+          "description": "Distribution of events by subscriber count (0 to 1K+). Subscriber count includes both LinkEvent and MonitorEvent subscribers. Shows the shape of pub/sub usage across the cluster."
         },
         {
           "id": 105,
@@ -1621,7 +1621,7 @@
               }
             }
           ],
-          "description": "Top 50 events by subscriber count across the cluster. Identifies events with the widest audience. Events with many subscribers amplify each publish into many local deliveries."
+          "description": "Top 50 events by subscriber count (LinkEvent + MonitorEvent combined). Identifies events with the widest audience. Events with many subscribers amplify each publish into many local deliveries."
         },
         {
           "id": 106,
