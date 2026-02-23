@@ -68,6 +68,9 @@ type Actor struct {
 	registeredNames     prometheus.Gauge
 	registeredAliases   prometheus.Gauge
 	registeredEvents    prometheus.Gauge
+	eventsPublished     prometheus.Gauge
+	eventsLocalSent     prometheus.Gauge
+	eventsRemoteSent    prometheus.Gauge
 
 	// Latency metrics (enabled with -tags=latency)
 	latency latencyMetrics
@@ -77,6 +80,9 @@ type Actor struct {
 
 	// Process utilization metrics
 	utilization utilizationMetrics
+
+	// Event metrics
+	event eventMetrics
 
 	// Process aggregate metrics
 	processMessagesIn  prometheus.Gauge
@@ -244,6 +250,21 @@ func (a *Actor) initializeMetrics() error {
 		Help:        "Total number of registered events",
 		ConstLabels: nodeLabels,
 	})
+	a.eventsPublished = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name:        "ergo_events_published_total",
+		Help:        "Cumulative number of events published",
+		ConstLabels: nodeLabels,
+	})
+	a.eventsLocalSent = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name:        "ergo_events_local_sent_total",
+		Help:        "Cumulative number of event messages sent to local subscribers",
+		ConstLabels: nodeLabels,
+	})
+	a.eventsRemoteSent = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name:        "ergo_events_remote_sent_total",
+		Help:        "Cumulative number of event messages sent to remote subscribers",
+		ConstLabels: nodeLabels,
+	})
 
 	// Network metrics
 	a.connectedNodes = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -301,6 +322,9 @@ func (a *Actor) initializeMetrics() error {
 	// Initialize process utilization metrics
 	a.utilization.init(a.registry, nodeLabels)
 
+	// Initialize event metrics
+	a.event.init(a.registry, nodeLabels)
+
 	// Process aggregate metrics
 	a.processMessagesIn = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name:        "ergo_process_messages_in",
@@ -337,6 +361,9 @@ func (a *Actor) initializeMetrics() error {
 		a.registeredNames,
 		a.registeredAliases,
 		a.registeredEvents,
+		a.eventsPublished,
+		a.eventsLocalSent,
+		a.eventsRemoteSent,
 		a.connectedNodes,
 		a.remoteNodeUptime,
 		a.remoteMessagesIn,
@@ -401,6 +428,9 @@ func (a *Actor) collectBaseMetrics() error {
 	a.registeredNames.Set(float64(nodeInfo.RegisteredNames))
 	a.registeredAliases.Set(float64(nodeInfo.RegisteredAliases))
 	a.registeredEvents.Set(float64(nodeInfo.RegisteredEvents))
+	a.eventsPublished.Set(float64(nodeInfo.EventsPublished))
+	a.eventsLocalSent.Set(float64(nodeInfo.EventsLocalSent))
+	a.eventsRemoteSent.Set(float64(nodeInfo.EventsRemoteSent))
 
 	// Get network information
 	network := a.Node().Network()
@@ -465,6 +495,14 @@ func (a *Actor) collectBaseMetrics() error {
 	a.depth.flush()
 	a.utilization.flush()
 	a.latency.flush()
+
+	// Collect event metrics
+	a.event.begin()
+	a.Node().EventRangeInfo(func(info gen.EventInfo) bool {
+		a.event.observe(info, topN)
+		return true
+	})
+	a.event.flush()
 
 	a.processMessagesIn.Set(float64(totalMessagesIn))
 	a.processMessagesOut.Set(float64(totalMessagesOut))

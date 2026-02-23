@@ -4,7 +4,7 @@ A Prometheus metrics exporter actor for Ergo Framework that automatically collec
 
 ## Features
 
-- **Automatic Base Metrics Collection**: Collects node metrics (uptime, processes, memory, CPU) and network metrics (connected nodes, messages, bytes transferred)
+- **Automatic Base Metrics Collection**: Collects node metrics (uptime, processes, memory, CPU), network metrics (connected nodes, messages, bytes transferred), and event metrics (pub/sub subscribers, publish rates, delivery fanout)
 - **HTTP Endpoint**: Exposes metrics in Prometheus format at `/metrics`
 - **Periodic Collection**: Configurable interval for automatic metrics updates
 - **Extensible**: Easy to extend with custom application-specific metrics
@@ -47,7 +47,7 @@ options := metrics.Options{
     Host:            "0.0.0.0",           // Listen address
     Port:            9090,                 // HTTP port
     CollectInterval: 5 * time.Second,     // Collection frequency
-    TopN:            50,                   // Top-N processes for each metric group
+    TopN:            50,                   // Top-N entries for each metric group (processes and events)
 }
 
 n.Spawn(metrics.Factory, gen.ProcessOptions{}, options)
@@ -142,6 +142,9 @@ func (m *MyMetrics) CollectMetrics() error {
 | `ergo_registered_names_total` | Gauge | Total registered process names |
 | `ergo_registered_aliases_total` | Gauge | Total registered aliases |
 | `ergo_registered_events_total` | Gauge | Total registered events |
+| `ergo_events_published_total` | Gauge | Cumulative number of events published |
+| `ergo_events_local_sent_total` | Gauge | Cumulative number of event messages sent to local subscribers |
+| `ergo_events_remote_sent_total` | Gauge | Cumulative number of event messages sent to remote nodes |
 
 ### Network Metrics
 
@@ -219,6 +222,32 @@ Distribution ranges: 1, 5, 10, 50, 100, 500, 1K, 5K, 10K, 10K+.
 
 Each range represents an upper boundary. For example, "5" counts processes with 2 to 5 messages in the mailbox. Processes with empty mailboxes are not counted.
 
+### Event Metrics
+
+The metrics actor collects per-event pub/sub metrics using `Node.EventRangeInfo()`. This provides visibility into which events have the most subscribers and which generate the most delivery load.
+
+No build tags required. Event metrics are always active.
+
+#### Per-Event Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `ergo_event_subscribers_distribution` | Gauge | range | Number of events in each subscriber count range (snapshot per collect cycle) |
+| `ergo_event_subscribers_max` | Gauge | - | Maximum subscriber count across all events on this node |
+| `ergo_event_waste` | Gauge | reason | Number of events with wasteful usage patterns (snapshot per collect cycle) |
+| `ergo_event_subscribers_top` | Gauge | event, producer | Top-N events by subscriber count |
+| `ergo_event_published_top` | Gauge | event, producer | Top-N events by messages published |
+| `ergo_event_local_sent_top` | Gauge | event, producer | Top-N events by messages delivered to local subscribers |
+| `ergo_event_remote_sent_top` | Gauge | event, producer | Top-N events by messages sent to remote nodes |
+
+Distribution ranges: 0, 1, 2-5, 6-10, 11-50, 51-100, 101-500, 501-1K, 1K+.
+
+Each range represents an upper boundary. For example, "2-5" counts events with 2 to 5 subscribers. The "1K+" range counts events with more than 1000 subscribers.
+
+Waste reasons: `idle` (registered, no publishes, no subscribers), `no_subscribers` (publishing but nobody listening), `no_publishing` (subscribers waiting but no publishes). All three are snapshots per collect cycle.
+
+The distinction between `published`, `local_sent`, and `remote_sent` reflects the pub/sub delivery model. A single publish may fan out to many local subscribers (`local_sent >> published`) and to multiple remote nodes (`remote_sent` counts one per node, not per subscriber, due to the shared subscription optimization). Comparing these values reveals the actual delivery load each event creates.
+
 ### Process Utilization Metrics
 
 The metrics actor collects per-process utilization -- the ratio of callback running time to process uptime. This is a lifetime average that shows which actors have spent the most time executing callbacks relative to their total existence.
@@ -249,19 +278,6 @@ Node-level aggregate counters computed as the sum of per-process values across a
 
 These values are sums of per-process cumulative counters. When a process terminates, its contribution is removed, which may cause the aggregate to decrease. This is expected -- `rate()` handles it correctly in most cases, though short-lived process churn may produce minor artifacts.
 
-#### Cardinality
-
-All per-process metrics (depth, utilization, latency) share the same `TopN` setting. For a cluster of 500 nodes with `TopN=50`:
-
-- Depth distribution: 500 x 10 = 5,000
-- Depth max + top-N: 500 x (1 + 50) = 25,500
-- Utilization distribution: 500 x 8 = 4,000
-- Utilization max + top-N: 500 x (1 + 50) = 25,500
-- Latency distribution: 500 x 12 = 6,000 (with `-tags=latency`)
-- Latency max + count + top-N: 500 x (2 + 50) = 26,000 (with `-tags=latency`)
-- Aggregates: 500 x 3 = 1,500
-- Total (without latency): ~61,500 series
-- Total (with latency): ~93,500 series
 
 ## Observer Integration
 
@@ -382,6 +398,31 @@ Three panels showing how many messages are currently queued in process mailboxes
 - **Max Depth per Node** -- maximum mailbox queue depth per node over time. A growing value means at least one process is accumulating messages faster than it can process them. Compare with the latency Max Latency panel -- high depth with low latency means the process handles messages quickly but receives many; high depth with high latency means it is falling behind
 - **Depth Distribution** -- stacked area chart showing how many processes fall into each depth range over time. Uses a flame color gradient: green tones for low depth (1-10 messages), yellow for moderate (50-100), orange for high (500-1K), red for critical (5K-10K+). In a healthy system most processes should have low depth. A shift toward red indicates growing backpressure
 - **Top Processes by Depth** -- table showing processes with the deepest mailbox queues across the cluster. Columns: Application, Behavior, Name, PID, Node, Depth (plus Kubernetes labels when available). Sorted by depth descending. Use this to identify which actors are accumulating the most messages
+
+#### Events (collapsed row)
+
+A collapsed row containing nine panels. Click to expand. Organized from general to specific: cluster-wide rates, per-node breakdown, subscriber distribution, and top-N tables.
+
+Two timeseries panels (cluster-wide overview):
+
+- **Event Publish/Delivery Rate** -- three lines showing `rate()` of published, local delivered, and remote sent event messages. Published (blue) shows how often producers publish. Local Delivered (green) shows the actual fanout to local subscribers -- this is typically much higher than Published when events have many subscribers. Remote Sent (orange) shows messages sent to other nodes (one per node due to shared subscription optimization). A growing gap between Local Delivered and Published indicates increasing fanout load
+- **Event Waste** -- stacked timeseries showing events with wasteful usage patterns. Idle (grey) means registered but no publishes and no subscribers. No Subscribers (orange) means publishing into the void -- the producer is not using the `Notify` mechanism to detect absent subscribers. No Publishing (blue) means subscribers are waiting but the producer never publishes. All values at zero means the pub/sub system is healthy. Non-zero values are a signal to investigate specific events via the top-N tables below
+
+Two timeseries panels (per-node breakdown):
+
+- **Registered Events per Node** -- total number of registered events per node. A growing count without plateaus may indicate event registration leak (events being registered but never unregistered)
+- **Max Subscribers per Node** -- maximum subscriber count for any single event on each node. A high value means at least one event has many consumers, which amplifies the cost of each publish
+
+One full-width timeseries panel (subscriber landscape):
+
+- **Subscriber Distribution** -- stacked area chart showing how many events fall into each subscriber count range (0, 1, 2-5, 6-10, 11-50, 51-100, 101-500, 501-1K, 1K+). Uses a flame color gradient: green for 0-1, yellow-green for 2-10, orange for 11-100, red for 101-1K+. In most systems the majority of events will have few subscribers. A shift toward higher ranges indicates growing pub/sub complexity
+
+Four table panels (specific events):
+
+- **Top Events by Subscribers** -- top 50 events by subscriber count. Columns: Event, Producer, Node, Subscribers. Sorted by subscribers descending. Identifies events with the widest audience
+- **Top Events by Published** -- top 50 events by messages published. Columns: Event, Producer, Node, Published. Sorted by published descending. Identifies the most active producers
+- **Top Events by Local Deliveries** -- top 50 events by messages delivered to local subscribers. Columns: Event, Producer, Node, Local Deliveries. Sorted descending. Shows which events create the most local fanout load. An event that publishes rarely but has many subscribers will rank high here
+- **Top Events by Remote Sent** -- top 50 events by messages sent to remote nodes. Columns: Event, Producer, Node, Remote Sent. Sorted descending. Shows which events generate the most inter-node traffic
 
 #### Process Activity (collapsed row)
 

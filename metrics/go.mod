@@ -7,6 +7,8 @@ require (
 	github.com/prometheus/client_golang v1.20.5
 )
 
+replace ergo.services/ergo => ../../ergo
+
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
