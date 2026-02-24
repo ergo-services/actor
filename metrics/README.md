@@ -232,19 +232,14 @@ No build tags required. Event metrics are always active.
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `ergo_event_subscribers_distribution` | Gauge | range | Number of events in each subscriber count range (snapshot per collect cycle) |
 | `ergo_event_subscribers_max` | Gauge | - | Maximum subscriber count across all events on this node |
-| `ergo_event_waste` | Gauge | reason | Number of events with wasteful usage patterns (snapshot per collect cycle) |
+| `ergo_event_utilization` | Gauge | state | Number of events in each utilization state (snapshot per collect cycle) |
 | `ergo_event_subscribers_top` | Gauge | event, producer | Top-N events by subscriber count |
 | `ergo_event_published_top` | Gauge | event, producer | Top-N events by messages published |
 | `ergo_event_local_sent_top` | Gauge | event, producer | Top-N events by messages delivered to local subscribers |
 | `ergo_event_remote_sent_top` | Gauge | event, producer | Top-N events by messages sent to remote nodes |
 
-Distribution ranges: 0, 1, 2-5, 6-10, 11-50, 51-100, 101-500, 501-1K, 1K+.
-
-Each range represents an upper boundary. For example, "2-5" counts events with 2 to 5 subscribers. The "1K+" range counts events with more than 1000 subscribers.
-
-Waste reasons: `idle` (registered, no publishes, no subscribers), `no_subscribers` (publishing but nobody listening), `no_publishing` (subscribers waiting but no publishes). All three are snapshots per collect cycle.
+Utilization states: `active` (published and has subscribers -- event is doing its job), `on_demand` (event uses `Notify` mechanism, currently waiting for subscribers or data -- correct on-demand behavior), `idle` (registered without `Notify`, no publishes, no subscribers -- potentially forgotten), `no_subscribers` (published but nobody listening -- publishing into the void), `no_publishing` (subscribers waiting but producer never published). Every event falls into exactly one state. All values are snapshots per collect cycle.
 
 The distinction between `published`, `local_sent`, and `remote_sent` reflects the pub/sub delivery model. A single publish may fan out to many local subscribers (`local_sent >> published`) and to multiple remote nodes (`remote_sent` counts one per node, not per subscriber, due to the shared subscription optimization). Comparing these values reveals the actual delivery load each event creates.
 
@@ -266,17 +261,19 @@ Distribution ranges: 1%, 5%, 10%, 25%, 50%, 75%, 90%, 90%+.
 
 Utilization is computed as `RunningTime / Uptime`. A value of 0.50 means the process has spent 50% of its lifetime executing callbacks. The remaining time was spent waiting for messages. Processes with zero running time or zero uptime are excluded.
 
-### Process Aggregate Metrics
+### Process Throughput Metrics
 
-Node-level aggregate counters computed as the sum of per-process values across all processes on the node. These are cumulative values -- use `rate()` in Prometheus/Grafana to get per-second throughput.
+Per-process message throughput top-N and node-level aggregates.
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `ergo_process_messages_in` | Gauge | Sum of messages received by all processes on this node |
-| `ergo_process_messages_out` | Gauge | Sum of messages sent by all processes on this node |
-| `ergo_process_running_time_seconds` | Gauge | Sum of callback running time across all processes on this node (seconds) |
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `ergo_process_messages_in_top` | Gauge | pid, name, application, behavior | Top-N processes by total messages received |
+| `ergo_process_messages_out_top` | Gauge | pid, name, application, behavior | Top-N processes by total messages sent |
+| `ergo_process_messages_in` | Gauge | - | Sum of messages received by all processes on this node |
+| `ergo_process_messages_out` | Gauge | - | Sum of messages sent by all processes on this node |
+| `ergo_process_running_time_seconds` | Gauge | - | Sum of callback running time across all processes on this node (seconds) |
 
-These values are sums of per-process cumulative counters. When a process terminates, its contribution is removed, which may cause the aggregate to decrease. This is expected -- `rate()` handles it correctly in most cases, though short-lived process churn may produce minor artifacts.
+Aggregate values are sums of per-process cumulative counters. When a process terminates, its contribution is removed, which may cause the aggregate to decrease. This is expected -- `rate()` handles it correctly in most cases, though short-lived process churn may produce minor artifacts.
 
 
 ## Observer Integration
@@ -401,21 +398,22 @@ Three panels showing how many messages are currently queued in process mailboxes
 
 #### Events (collapsed row)
 
-A collapsed row containing nine panels. Click to expand. Organized from general to specific: cluster-wide rates, per-node breakdown, subscriber distribution, and top-N tables.
+A collapsed row containing ten panels. Click to expand. Organized from general to specific: cluster-wide rates and utilization, per-node breakdown, per-node rates, and top-N tables.
 
 Two timeseries panels (cluster-wide overview):
 
 - **Event Publish/Delivery Rate** -- three lines showing `rate()` of published, local delivered, and remote sent event messages. Published (blue) shows how often producers publish. Local Delivered (green) shows the actual fanout to local subscribers -- this is typically much higher than Published when events have many subscribers. Remote Sent (orange) shows messages sent to other nodes (one per node due to shared subscription optimization). A growing gap between Local Delivered and Published indicates increasing fanout load
-- **Event Waste** -- stacked timeseries showing events with wasteful usage patterns. Idle (grey) means registered but no publishes and no subscribers. No Subscribers (orange) means publishing into the void -- the producer is not using the `Notify` mechanism to detect absent subscribers. No Publishing (blue) means subscribers are waiting but the producer never publishes. All values at zero means the pub/sub system is healthy. Non-zero values are a signal to investigate specific events via the top-N tables below
+- **Event Utilization** -- stacked timeseries showing the utilization state of all registered events. Active (green): publishing with subscribers -- event is working. On Demand (blue): uses Notify mechanism, waiting for subscribers or data -- correct behavior. Idle (grey): registered without Notify, no publishes, no subscribers -- potentially forgotten. No Subscribers (orange): publishing but nobody listening. No Publishing (yellow): subscribers waiting but producer never published. The total height equals the total number of registered events. A healthy system is mostly green and blue
 
-Two timeseries panels (per-node breakdown):
+Two timeseries panels (per-node rates):
+
+- **Event Publish Rate per Node** -- event publish rate per node. Shows which nodes have the most active producers. A spike on one node while others are stable points to a localized producer issue
+- **Event Delivery Rate per Node** -- local event delivery rate per node. Shows where fanout load concentrates. High delivery rate relative to publish rate indicates events with many subscribers on that node
+
+Two timeseries panels (per-node counts):
 
 - **Registered Events per Node** -- total number of registered events per node. A growing count without plateaus may indicate event registration leak (events being registered but never unregistered)
 - **Max Subscribers per Node** -- maximum subscriber count for any single event on each node. A high value means at least one event has many consumers, which amplifies the cost of each publish
-
-One full-width timeseries panel (subscriber landscape):
-
-- **Subscriber Distribution** -- stacked area chart showing how many events fall into each subscriber count range (0, 1, 2-5, 6-10, 11-50, 51-100, 101-500, 501-1K, 1K+). Uses a flame color gradient: green for 0-1, yellow-green for 2-10, orange for 11-100, red for 101-1K+. In most systems the majority of events will have few subscribers. A shift toward higher ranges indicates growing pub/sub complexity
 
 Four table panels (specific events):
 
@@ -426,12 +424,27 @@ Four table panels (specific events):
 
 #### Process Activity (collapsed row)
 
-A collapsed row containing four panels. Click to expand. Shows process utilization, message throughput, and running time.
+A collapsed row containing eight panels organized by topic: message throughput first, then process utilization. Click to expand.
 
-- **Utilization Distribution** -- stacked area chart showing how many processes fall into each utilization range over time. Utilization is `RunningTime / Uptime` -- the fraction of a process lifetime spent executing callbacks. Uses a flame color gradient: green for low utilization (1%-10%), yellow for moderate (25%-50%), orange/red for high (75%-90%+). In most systems the majority of processes should be in the low ranges. A shift toward higher ranges indicates increasing compute load
-- **Message Throughput per Node** -- message rate per node showing `rate(ergo_process_messages_in)` and `rate(ergo_process_messages_out)`. Unit: messages per second. Provides a node-level view of how much work is flowing through the system. A sudden drop may indicate stalled processes; a spike may precede latency increases
-- **Top Processes by Utilization** -- table showing the busiest processes by lifetime utilization across the cluster. Values are displayed as percentages. Helps identify actors that consume the most CPU time relative to their existence. A process at 90%+ utilization is almost always busy and may benefit from load distribution
-- **Actor Running Time per Node** -- `rate(ergo_process_running_time_seconds)` per node, showing how many seconds of callback execution are happening per second across all processes on each node. Effectively a node-level CPU utilization metric for actor callbacks. When this value approaches the number of available CPU cores, the node is compute-saturated
+Two timeseries panels (message throughput overview):
+
+- **Message Throughput (Cluster Total)** -- cluster-wide message rate showing total inbound (received by processes) and outbound (sent by processes). A sudden drop may indicate stalled processes or upstream failures
+- **Message Throughput per Node** -- message rate per node showing inbound and outbound. Identifies nodes with the highest message flow
+
+Two timeseries panels (message throughput top-N by rate):
+
+- **Top Processes by Inbound Rate** -- top 10 processes by current inbound message rate (msg/s). Shows which actors are receiving the most messages right now. Compare with mailbox depth -- high rate with low depth means the process handles messages quickly; high rate with growing depth means it's falling behind
+- **Top Processes by Outbound Rate** -- top 10 processes by current outbound message rate (msg/s). Shows which actors generate the most messages right now. High outbound rate identifies the busiest senders -- event producers, dispatchers, coordinators
+
+Two timeseries panels (utilization overview):
+
+- **Utilization Distribution** -- stacked area chart showing how many processes fall into each utilization range (1%-90%+). Utilization is `RunningTime / Uptime`. A shift toward higher ranges indicates increasing compute load
+- **Max Utilization per Node** -- maximum process utilization per node. Persistently high values indicate a compute-bound actor that may need load distribution
+
+Two panels (utilization detail):
+
+- **Actor Running Time per Node** -- `rate(ergo_process_running_time_seconds)` per node, showing seconds of callback execution per second. When this approaches CPU core count, the node is compute-saturated
+- **Top Processes by Utilization** -- table showing the busiest processes by lifetime utilization. A process at 90%+ is almost always busy
 
 #### Processes (collapsed row)
 

@@ -8,16 +8,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-var eventSubscriberBoundaries = []int64{0, 1, 5, 10, 50, 100, 500, 1000}
-
-var eventSubscriberRangeLabels = []string{
-	"0", "1", "2-5", "6-10", "11-50", "51-100", "101-500", "501-1K", "1K+",
-}
-
 type eventMetrics struct {
-	distribution   *prometheus.GaugeVec
 	maxSubs        prometheus.Gauge
-	waste          *prometheus.GaugeVec
+	utilization    *prometheus.GaugeVec
 	topSubs        *prometheus.GaugeVec
 	topPublished   *prometheus.GaugeVec
 	topLocalSent   *prometheus.GaugeVec
@@ -25,8 +18,7 @@ type eventMetrics struct {
 
 	// per-cycle accumulators
 	max            int64
-	buckets        []float64
-	wasteCounts    [3]float64 // idle, no_subscribers, no_publishing
+	utilCounts     [5]float64 // active, on_demand, idle, no_subscribers, no_publishing
 	heapSubs       *eventHeap
 	heapPublished  *eventHeap
 	heapLocalSent  *eventHeap
@@ -34,28 +26,19 @@ type eventMetrics struct {
 }
 
 func (em *eventMetrics) init(registry *prometheus.Registry, nodeLabels prometheus.Labels) {
-	em.distribution = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:        "ergo_event_subscribers_distribution",
-			Help:        "Number of events by subscriber count range (snapshot per collect cycle)",
-			ConstLabels: nodeLabels,
-		},
-		[]string{"range"},
-	)
-
 	em.maxSubs = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name:        "ergo_event_subscribers_max",
 		Help:        "Maximum subscriber count across all events on this node",
 		ConstLabels: nodeLabels,
 	})
 
-	em.waste = prometheus.NewGaugeVec(
+	em.utilization = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name:        "ergo_event_waste",
-			Help:        "Number of events with wasteful usage patterns (snapshot per collect cycle)",
+			Name:        "ergo_event_utilization",
+			Help:        "Number of events in each utilization state (snapshot per collect cycle)",
 			ConstLabels: nodeLabels,
 		},
-		[]string{"reason"},
+		[]string{"state"},
 	)
 
 	em.topSubs = prometheus.NewGaugeVec(
@@ -95,9 +78,8 @@ func (em *eventMetrics) init(registry *prometheus.Registry, nodeLabels prometheu
 	)
 
 	registry.MustRegister(
-		em.distribution,
 		em.maxSubs,
-		em.waste,
+		em.utilization,
 		em.topSubs,
 		em.topPublished,
 		em.topLocalSent,
@@ -107,8 +89,7 @@ func (em *eventMetrics) init(registry *prometheus.Registry, nodeLabels prometheu
 
 func (em *eventMetrics) begin() {
 	em.max = 0
-	em.buckets = make([]float64, len(eventSubscriberBoundaries)+1)
-	em.wasteCounts = [3]float64{}
+	em.utilCounts = [5]float64{}
 	em.heapSubs = &eventHeap{}
 	em.heapPublished = &eventHeap{}
 	em.heapLocalSent = &eventHeap{}
@@ -122,26 +103,17 @@ func (em *eventMetrics) observe(info gen.EventInfo, topN int) {
 		em.max = subs
 	}
 
-	// find bucket for subscriber count
-	placed := false
-	for i, boundary := range eventSubscriberBoundaries {
-		if subs <= boundary {
-			em.buckets[i]++
-			placed = true
-			break
-		}
-	}
-	if placed == false {
-		em.buckets[len(eventSubscriberBoundaries)]++
-	}
-
-	// classify waste patterns
-	if info.MessagesPublished == 0 && subs == 0 {
-		em.wasteCounts[0]++ // idle
+	// classify event utilization state
+	if info.MessagesPublished > 0 && subs > 0 {
+		em.utilCounts[0]++ // active
+	} else if info.Notify {
+		em.utilCounts[1]++ // on_demand
+	} else if info.MessagesPublished == 0 && subs == 0 {
+		em.utilCounts[2]++ // idle
 	} else if info.MessagesPublished > 0 && subs == 0 {
-		em.wasteCounts[1]++ // no_subscribers
+		em.utilCounts[3]++ // no_subscribers
 	} else if subs > 0 && info.MessagesPublished == 0 {
-		em.wasteCounts[2]++ // no_publishing
+		em.utilCounts[4]++ // no_publishing
 	}
 
 	eventName := string(info.Event.Name)
@@ -185,13 +157,11 @@ func (em *eventMetrics) observe(info gen.EventInfo, topN int) {
 func (em *eventMetrics) flush() {
 	em.maxSubs.Set(float64(em.max))
 
-	for i, label := range eventSubscriberRangeLabels {
-		em.distribution.WithLabelValues(label).Set(em.buckets[i])
-	}
-
-	em.waste.WithLabelValues("idle").Set(em.wasteCounts[0])
-	em.waste.WithLabelValues("no_subscribers").Set(em.wasteCounts[1])
-	em.waste.WithLabelValues("no_publishing").Set(em.wasteCounts[2])
+	em.utilization.WithLabelValues("active").Set(em.utilCounts[0])
+	em.utilization.WithLabelValues("on_demand").Set(em.utilCounts[1])
+	em.utilization.WithLabelValues("idle").Set(em.utilCounts[2])
+	em.utilization.WithLabelValues("no_subscribers").Set(em.utilCounts[3])
+	em.utilization.WithLabelValues("no_publishing").Set(em.utilCounts[4])
 
 	eventGaugeFlush(em.topSubs, em.heapSubs)
 	eventGaugeFlush(em.topPublished, em.heapPublished)
