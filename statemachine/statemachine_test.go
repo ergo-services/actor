@@ -10,7 +10,7 @@ import (
 type Data struct{}
 
 type BasicStatemachine struct {
-	StateMachine[Data]
+	FSM[Data]
 }
 
 type StateChange struct{}
@@ -19,8 +19,8 @@ func factoryBasicStatemachine() gen.ProcessBehavior {
 	return &BasicStatemachine{}
 }
 
-func (b *BasicStatemachine) Init(args ...any) (StateMachineSpec[Data], error) {
-	spec := NewStateMachineSpec(
+func (b *BasicStatemachine) Init(args ...any) (Spec[Data], error) {
+	spec := NewSpec(
 		gen.Atom("StateA"),
 
 		WithStateEnterCallback(stateEnter),
@@ -30,11 +30,11 @@ func (b *BasicStatemachine) Init(args ...any) (StateMachineSpec[Data], error) {
 	return spec, nil
 }
 
-func changeState(state gen.Atom, data Data, msg StateChange, proc gen.Process) (gen.Atom, Data, []Action, error) {
+func changeState(_ gen.PID, state gen.Atom, data Data, msg StateChange, proc gen.Process) (gen.Atom, Data, []Action, error) {
 	return gen.Atom("StateB"), data, nil, nil
 }
 
-func changeStateSync(state gen.Atom, data Data, msg StateChange, proc gen.Process) (gen.Atom, Data, gen.Atom, []Action, error) {
+func changeStateSync(_ gen.PID, state gen.Atom, data Data, msg StateChange, proc gen.Process) (gen.Atom, Data, gen.Atom, []Action, error) {
 	return gen.Atom("StateB"), data, gen.Atom("StateB"), nil, nil
 }
 

@@ -11,10 +11,10 @@ import (
 	"ergo.services/ergo/lib"
 )
 
-type StateMachineBehavior[D any] interface {
+type Behavior[D any] interface {
 	gen.ProcessBehavior
 
-	Init(args ...any) (StateMachineSpec[D], error)
+	Init(args ...any) (Spec[D], error)
 
 	HandleMessage(from gen.PID, message any) error
 
@@ -35,14 +35,14 @@ type StateMachineBehavior[D any] interface {
 	SetData(data D)
 }
 
-type StateMachine[D any] struct {
+type FSM[D any] struct {
 	gen.Process
 
-	behavior StateMachineBehavior[D]
+	behavior Behavior[D]
 	mailbox  gen.ProcessMailbox
 
 	// The specification for the StateMachine
-	spec StateMachineSpec[D]
+	spec Spec[D]
 
 	// The state the StateMachine is currently in
 	currentState gen.Atom
@@ -151,7 +151,7 @@ type EventHandler[D any, E any] func(gen.Atom, D, E, gen.Process) (gen.Atom, D, 
 // D is the type of the data associated with the StateMachine.
 type StateEnterCallback[D any] func(gen.Atom, gen.Atom, D, gen.Process) (gen.Atom, D, error)
 
-type StateMachineSpec[D any] struct {
+type Spec[D any] struct {
 	initialState         gen.Atom
 	data                 D
 	stateMessageHandlers map[gen.Atom]map[string]any
@@ -160,10 +160,10 @@ type StateMachineSpec[D any] struct {
 	stateEnterCallback   StateEnterCallback[D]
 }
 
-type Option[D any] func(*StateMachineSpec[D])
+type Option[D any] func(*Spec[D])
 
-func NewStateMachineSpec[D any](initialState gen.Atom, options ...Option[D]) StateMachineSpec[D] {
-	spec := StateMachineSpec[D]{
+func NewSpec[D any](initialState gen.Atom, options ...Option[D]) Spec[D] {
+	spec := Spec[D]{
 		initialState:         initialState,
 		stateMessageHandlers: make(map[gen.Atom]map[string]any),
 		stateCallHandlers:    make(map[gen.Atom]map[string]any),
@@ -176,14 +176,14 @@ func NewStateMachineSpec[D any](initialState gen.Atom, options ...Option[D]) Sta
 }
 
 func WithData[D any](data D) Option[D] {
-	return func(s *StateMachineSpec[D]) {
+	return func(s *Spec[D]) {
 		s.data = data
 	}
 }
 
 func WithStateMessageHandler[D any, M any](state gen.Atom, handler StateMessageHandler[D, M]) Option[D] {
 	messageType := reflect.TypeOf((*M)(nil)).Elem().String()
-	return func(s *StateMachineSpec[D]) {
+	return func(s *Spec[D]) {
 		if _, exists := s.stateMessageHandlers[state]; exists == false {
 			s.stateMessageHandlers[state] = make(map[string]any)
 		}
@@ -193,7 +193,7 @@ func WithStateMessageHandler[D any, M any](state gen.Atom, handler StateMessageH
 
 func WithStateCallHandler[D any, M any, R any](state gen.Atom, handler StateCallHandler[D, M, R]) Option[D] {
 	messageType := reflect.TypeOf((*M)(nil)).Elem().String()
-	return func(s *StateMachineSpec[D]) {
+	return func(s *Spec[D]) {
 		if _, exists := s.stateCallHandlers[state]; exists == false {
 			s.stateCallHandlers[state] = make(map[string]any)
 		}
@@ -202,22 +202,22 @@ func WithStateCallHandler[D any, M any, R any](state gen.Atom, handler StateCall
 }
 
 func WithStateEnterCallback[D any](callback StateEnterCallback[D]) Option[D] {
-	return func(s *StateMachineSpec[D]) {
+	return func(s *Spec[D]) {
 		s.stateEnterCallback = callback
 	}
 }
 
 func WithEventHandler[D any, E any](event gen.Event, handler EventHandler[D, E]) Option[D] {
-	return func(s *StateMachineSpec[D]) {
+	return func(s *Spec[D]) {
 		s.eventHandlers[event] = handler
 	}
 }
 
-func (s *StateMachine[D]) CurrentState() gen.Atom {
+func (s *FSM[D]) CurrentState() gen.Atom {
 	return s.currentState
 }
 
-func (s *StateMachine[D]) SetCurrentState(state gen.Atom) error {
+func (s *FSM[D]) SetCurrentState(state gen.Atom) error {
 	if state != s.currentState {
 		s.Log().Debug("StateMachine: switching to state %s", state)
 		oldState := s.currentState
@@ -245,23 +245,23 @@ func (s *StateMachine[D]) SetCurrentState(state gen.Atom) error {
 	return nil
 }
 
-func (s *StateMachine[D]) Data() D {
+func (s *FSM[D]) Data() D {
 	return s.data
 }
 
-func (s *StateMachine[D]) SetData(data D) {
+func (s *FSM[D]) SetData(data D) {
 	s.data = data
 }
 
-func (s *StateMachine[D]) hasActiveStateTimeout() bool {
+func (s *FSM[D]) hasActiveStateTimeout() bool {
 	return s.stateTimeout != nil && !s.stateTimeout.cancelled
 }
 
-func (s *StateMachine[D]) hasActiveMessageTimeout() bool {
+func (s *FSM[D]) hasActiveMessageTimeout() bool {
 	return s.messageTimeout != nil && !s.messageTimeout.cancelled
 }
 
-func (s *StateMachine[D]) hasActiveGenericTimeout(name gen.Atom) bool {
+func (s *FSM[D]) hasActiveGenericTimeout(name gen.Atom) bool {
 	if timeout, exists := s.genericTimeouts[name]; exists {
 		return !timeout.cancelled
 	}
@@ -274,10 +274,10 @@ type startMonitoringEvents struct{}
 // ProcessBehavior implementation
 //
 
-func (s *StateMachine[D]) ProcessInit(process gen.Process, args ...any) (rr error) {
+func (s *FSM[D]) ProcessInit(process gen.Process, args ...any) (rr error) {
 	var ok bool
 
-	if s.behavior, ok = process.Behavior().(StateMachineBehavior[D]); ok == false {
+	if s.behavior, ok = process.Behavior().(Behavior[D]); ok == false {
 		unknown := strings.TrimPrefix(reflect.TypeOf(process.Behavior()).String(), "*")
 		return fmt.Errorf("ProcessInit: not a StateMachineBehavior %s", unknown)
 	}
@@ -319,7 +319,7 @@ func (s *StateMachine[D]) ProcessInit(process gen.Process, args ...any) (rr erro
 	return nil
 }
 
-func (s *StateMachine[D]) ProcessRun() (rr error) {
+func (s *FSM[D]) ProcessRun() (rr error) {
 	var message *gen.MailboxMessage
 
 	if lib.Recover() {
@@ -462,7 +462,7 @@ func (s *StateMachine[D]) ProcessRun() (rr error) {
 	}
 }
 
-func (s *StateMachine[D]) ProcessTerminate(reason error) {
+func (s *FSM[D]) ProcessTerminate(reason error) {
 	s.behavior.Terminate(reason)
 }
 
@@ -470,31 +470,31 @@ func (s *StateMachine[D]) ProcessTerminate(reason error) {
 // StateMachineBehavior default callbacks
 //
 
-func (s *StateMachine[D]) HandleMessage(from gen.PID, message any) error {
+func (s *FSM[D]) HandleMessage(from gen.PID, message any) error {
 	s.Log().Warning("StateMachine.HandleMessage: unhandled message from %s", from)
 	return nil
 }
 
-func (s *StateMachine[D]) HandleCall(from gen.PID, ref gen.Ref, request any) (any, error) {
+func (s *FSM[D]) HandleCall(from gen.PID, ref gen.Ref, request any) (any, error) {
 	s.Log().Warning("StateMachine.HandleCall: unhandled request from %s", from)
 	return nil, nil
 }
-func (s *StateMachine[D]) HandleEvent(message gen.MessageEvent) error {
+func (s *FSM[D]) HandleEvent(message gen.MessageEvent) error {
 	s.Log().Warning("StateMachine.HandleEvent: unhandled event message %#v", message)
 	return nil
 }
 
-func (s *StateMachine[D]) HandleInspect(from gen.PID, item ...string) map[string]string {
+func (s *FSM[D]) HandleInspect(from gen.PID, item ...string) map[string]string {
 	return nil
 }
 
-func (s *StateMachine[D]) Terminate(reason error) {}
+func (s *FSM[D]) Terminate(reason error) {}
 
 //
 // Internals
 //
 
-func (s *StateMachine[D]) ProcessActions(actions []Action, state gen.Atom) {
+func (s *FSM[D]) ProcessActions(actions []Action, state gen.Atom) {
 	for _, action := range actions {
 		switch action := action.(type) {
 		case StateTimeout:
@@ -548,7 +548,7 @@ func (s *StateMachine[D]) ProcessActions(actions []Action, state gen.Atom) {
 	}
 }
 
-func (s *StateMachine[D]) lookupMessageHandler(messageType string) (any, bool) {
+func (s *FSM[D]) lookupMessageHandler(messageType string) (any, bool) {
 	if stateMessageHandlers, exists := s.stateMessageHandlers[s.currentState]; exists == true {
 		if callback, exists := stateMessageHandlers[messageType]; exists == true {
 			return callback, true
@@ -557,7 +557,7 @@ func (s *StateMachine[D]) lookupMessageHandler(messageType string) (any, bool) {
 	return nil, false
 }
 
-func (s *StateMachine[D]) invokeMessageHandler(handler any, message *gen.MailboxMessage) error {
+func (s *FSM[D]) invokeMessageHandler(handler any, message *gen.MailboxMessage) error {
 	stateMachineValue := reflect.ValueOf(s)
 	callbackValue := reflect.ValueOf(handler)
 	fromValue := reflect.ValueOf(message.From)
@@ -576,7 +576,7 @@ func (s *StateMachine[D]) invokeMessageHandler(handler any, message *gen.Mailbox
 	return updateStateMachineWithResults(stateMachineValue, results)
 }
 
-func (s *StateMachine[D]) lookupCallHandler(messageType string) (any, bool) {
+func (s *FSM[D]) lookupCallHandler(messageType string) (any, bool) {
 	if stateCallHandlers, exists := s.stateCallHandlers[s.currentState]; exists == true {
 		if callback, exists := stateCallHandlers[messageType]; exists == true {
 			return callback, true
@@ -585,7 +585,7 @@ func (s *StateMachine[D]) lookupCallHandler(messageType string) (any, bool) {
 	return nil, false
 }
 
-func (s *StateMachine[D]) invokeCallHandler(handler any, message *gen.MailboxMessage) (any, error) {
+func (s *FSM[D]) invokeCallHandler(handler any, message *gen.MailboxMessage) (any, error) {
 	stateMachineValue := reflect.ValueOf(s)
 	callbackValue := reflect.ValueOf(handler)
 	fromValue := reflect.ValueOf(message.From)
@@ -608,7 +608,7 @@ func (s *StateMachine[D]) invokeCallHandler(handler any, message *gen.MailboxMes
 	return result, nil
 }
 
-func (s *StateMachine[D]) invokeEventHandler(handler any, message *gen.MessageEvent) error {
+func (s *FSM[D]) invokeEventHandler(handler any, message *gen.MessageEvent) error {
 	stateMachineValue := reflect.ValueOf(s)
 	callbackValue := reflect.ValueOf(handler)
 	stateValue := reflect.ValueOf(s.currentState)
