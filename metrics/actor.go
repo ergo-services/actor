@@ -87,6 +87,9 @@ type Actor struct {
 	// Process init time metrics
 	inittime initTimeMetrics
 
+	// Process wakeups metrics
+	wakeups wakeupsMetrics
+
 	// Event metrics
 	event eventMetrics
 
@@ -94,6 +97,7 @@ type Actor struct {
 	processMessagesIn  prometheus.Gauge
 	processMessagesOut prometheus.Gauge
 	processRunningTime prometheus.Gauge
+	processWakeups     prometheus.Gauge
 
 	// Network metrics
 	connectedNodes    prometheus.Gauge
@@ -334,6 +338,9 @@ func (a *Actor) initializeMetrics() error {
 	// Initialize process init time metrics
 	a.inittime.init(a.registry, nodeLabels)
 
+	// Initialize process wakeups metrics
+	a.wakeups.init(a.registry, nodeLabels)
+
 	// Initialize event metrics
 	a.event.init(a.registry, nodeLabels)
 
@@ -351,6 +358,11 @@ func (a *Actor) initializeMetrics() error {
 	a.processRunningTime = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name:        "ergo_process_running_time_seconds",
 		Help:        "Sum of callback running time across all processes on this node",
+		ConstLabels: nodeLabels,
+	})
+	a.processWakeups = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name:        "ergo_process_wakeups",
+		Help:        "Sum of wakeups (Sleep to Running transitions) across all processes on this node",
 		ConstLabels: nodeLabels,
 	})
 
@@ -385,6 +397,7 @@ func (a *Actor) initializeMetrics() error {
 		a.processMessagesIn,
 		a.processMessagesOut,
 		a.processRunningTime,
+		a.processWakeups,
 	)
 
 	return nil
@@ -481,10 +494,12 @@ func (a *Actor) collectBaseMetrics() error {
 	a.utilization.begin()
 	a.throughput.begin()
 	a.inittime.begin()
+	a.wakeups.begin()
 
 	var totalMessagesIn uint64
 	var totalMessagesOut uint64
 	var totalRunningTime uint64
+	var totalWakeups uint64
 
 	topN := a.options.TopN
 
@@ -493,6 +508,7 @@ func (a *Actor) collectBaseMetrics() error {
 		totalMessagesIn += info.MessagesIn
 		totalMessagesOut += info.MessagesOut
 		totalRunningTime += info.RunningTime
+		totalWakeups += info.Wakeups
 
 		// Mailbox depth metrics
 		a.depth.observe(info, topN)
@@ -509,6 +525,9 @@ func (a *Actor) collectBaseMetrics() error {
 		// Process init time metrics
 		a.inittime.observe(info, topN)
 
+		// Process wakeups metrics
+		a.wakeups.observe(info, topN)
+
 		return true
 	})
 
@@ -517,6 +536,7 @@ func (a *Actor) collectBaseMetrics() error {
 	a.latency.flush()
 	a.throughput.flush()
 	a.inittime.flush()
+	a.wakeups.flush()
 
 	// Collect event metrics
 	a.event.begin()
@@ -529,6 +549,7 @@ func (a *Actor) collectBaseMetrics() error {
 	a.processMessagesIn.Set(float64(totalMessagesIn))
 	a.processMessagesOut.Set(float64(totalMessagesOut))
 	a.processRunningTime.Set(float64(totalRunningTime) / 1e9)
+	a.processWakeups.Set(float64(totalWakeups))
 
 	return nil
 }

@@ -189,7 +189,7 @@ sum(ergo_mailbox_latency_distribution{node=~"$node", range="5ms"})
 ...one query per range for controlled legend order...
 ```
 
-Top 50 stressed processes across all nodes (table panel):
+Top-N stressed processes across all nodes (table panel):
 ```promql
 topk(50, ergo_mailbox_latency_top_seconds)
 ```
@@ -286,6 +286,19 @@ Per-process message throughput top-N and node-level aggregates.
 
 Aggregate values are sums of per-process cumulative counters. When a process terminates, its contribution is removed, which may cause the aggregate to decrease. This is expected -- `rate()` handles it correctly in most cases, though short-lived process churn may produce minor artifacts.
 
+### Process Wakeups and Drains Metrics
+
+The metrics actor tracks process wakeups (transitions from Sleep to Running state) and drains (messages processed per wakeup). Drain ratio (`MessagesIn / Wakeups`) reveals the nature of a process's load that utilization alone cannot distinguish. Two processes with 80% utilization may have completely different workloads: one with drain ~1 processes individual messages slowly (heavy per-message computation), while one with drain ~100 processes messages quickly but receives so many that it never sleeps (high throughput load). The optimization strategy is different: the first needs faster callbacks, the second needs load distribution.
+
+No build tags required. Wakeups and drains metrics are always active.
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `ergo_process_wakeups_top` | Gauge | pid, name, application, behavior | Top-N processes by cumulative wakeup count |
+| `ergo_process_drains_top` | Gauge | pid, name, application, behavior | Top-N processes by drain ratio (MessagesIn / Wakeups) |
+| `ergo_process_wakeups` | Gauge | - | Sum of wakeups across all processes on this node |
+
+On the dashboard, the Throughput panels show wakeup rate as a third line alongside message in/out rates -- the visual gap between message rate and wakeup rate represents the drain effect. Drains per Node timeseries shows per-node drain ratio over time. Top Processes by Drains table identifies specific actors with the highest drain.
 
 ## Observer Integration
 
@@ -380,7 +393,7 @@ One stacked timeseries panel:
 
 One table panel:
 
-- **Top Stressed Processes** -- top 50 processes by mailbox latency across the cluster. Columns: Application, Behavior, Name, PID, Node, Latency (plus Kubernetes labels when available: Pod, Container, Cluster, Service). Sorted by latency descending. Directly answers "which process is the bottleneck?"
+- **Top Stressed Processes** -- Top-N processes by mailbox latency across the cluster. Columns: Application, Behavior, Name, PID, Node, Latency (plus Kubernetes labels when available: Pod, Container, Cluster, Service). Sorted by latency descending. Directly answers "which process is the bottleneck?"
 
 #### Reading the Latency Dashboard
 
@@ -428,24 +441,29 @@ Two timeseries panels (per-node counts):
 
 Four table panels (specific events):
 
-- **Top Events by Subscribers** -- top 50 events by subscriber count. Columns: Event, Producer, Node, Subscribers. Sorted by subscribers descending. Identifies events with the widest audience
-- **Top Events by Published** -- top 50 events by messages published. Columns: Event, Producer, Node, Published. Sorted by published descending. Identifies the most active producers
-- **Top Events by Local Deliveries** -- top 50 events by messages delivered to local subscribers. Columns: Event, Producer, Node, Local Deliveries. Sorted descending. Shows which events create the most local fanout load. An event that publishes rarely but has many subscribers will rank high here
-- **Top Events by Remote Sent** -- top 50 events by messages sent to remote nodes. Columns: Event, Producer, Node, Remote Sent. Sorted descending. Shows which events generate the most inter-node traffic
+- **Top Events by Subscribers** -- Top-N events by subscriber count. Columns: Event, Producer, Node, Subscribers. Sorted by subscribers descending. Identifies events with the widest audience
+- **Top Events by Published** -- Top-N events by messages published. Columns: Event, Producer, Node, Published. Sorted by published descending. Identifies the most active producers
+- **Top Events by Local Deliveries** -- Top-N events by messages delivered to local subscribers. Columns: Event, Producer, Node, Local Deliveries. Sorted descending. Shows which events create the most local fanout load. An event that publishes rarely but has many subscribers will rank high here
+- **Top Events by Remote Sent** -- Top-N events by messages sent to remote nodes. Columns: Event, Producer, Node, Remote Sent. Sorted descending. Shows which events generate the most inter-node traffic
 
 #### Process Activity (collapsed row)
 
-A collapsed row containing eight panels organized by topic: message throughput first, then process utilization. Click to expand.
+A collapsed row containing ten panels organized by topic: message throughput, drains, then process utilization. Click to expand.
 
 Two timeseries panels (message throughput overview):
 
-- **Message Throughput (Cluster Total)** -- cluster-wide message rate showing total inbound (received by processes) and outbound (sent by processes). A sudden drop may indicate stalled processes or upstream failures
-- **Message Throughput per Node** -- message rate per node showing inbound and outbound. Identifies nodes with the highest message flow
+- **Message Throughput (Cluster Total)** -- cluster-wide message rate showing inbound, outbound, and wakeup rates. The gap between In and Wakeups shows drain effect: when they track together -- spare capacity, when In >> Wakeups -- processes batching under load
+- **Message Throughput per Node** -- same three rates per node. Identifies nodes where processes batch the most
 
 Two table panels (message throughput top-N):
 
-- **Top Processes by Messages In** -- top 50 processes by total messages received (cumulative). Identifies which actors handle the most inbound traffic
-- **Top Processes by Messages Out** -- top 50 processes by total messages sent (cumulative). Identifies which actors generate the most outbound traffic
+- **Top Processes by Messages In** -- Top-N processes by total messages received (cumulative). Identifies which actors handle the most inbound traffic
+- **Top Processes by Messages Out** -- Top-N processes by total messages sent (cumulative). Identifies which actors generate the most outbound traffic
+
+Two panels (drains):
+
+- **Drains per Node** -- per-node drain ratio over time (`rate(messages_in) / rate(wakeups)`). Value ~1 means spare capacity, growing value means processes batch more per wakeup. Complements utilization: two processes with 80% utilization may have drain ~1 (slow callbacks) or drain ~100 (fast callbacks, high volume) -- different problems requiring different solutions
+- **Top Processes by Drains** -- table showing processes with highest drain ratio. Identifies which actors are under the heaviest sustained load
 
 Two timeseries panels (utilization overview):
 

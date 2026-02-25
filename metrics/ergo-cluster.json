@@ -744,7 +744,7 @@
           }
         ]
       },
-      "description": "Top 50 processes by mailbox latency across the cluster, sorted descending. Directly answers which process is the bottleneck. Columns include Application, Behavior, and Name so you can identify the actor type. Requires -tags=latency."
+      "description": "Top-N processes by mailbox latency across the cluster, sorted descending. Directly answers which process is the bottleneck. Columns include Application, Behavior, and Name so you can identify the actor type. Requires -tags=latency."
     },
     {
       "id": 70,
@@ -1549,7 +1549,7 @@
               }
             }
           ],
-          "description": "Top 50 events by subscriber count (LinkEvent + MonitorEvent combined). Identifies events with the widest audience. Events with many subscribers amplify each publish into many local deliveries."
+          "description": "Top-N events by subscriber count (LinkEvent + MonitorEvent combined). Identifies events with the widest audience. Events with many subscribers amplify each publish into many local deliveries."
         },
         {
           "id": 106,
@@ -1606,7 +1606,7 @@
               }
             }
           ],
-          "description": "Top 50 events by total messages published. Identifies the most active producers. High publish count with low subscriber count may indicate wasteful publishing."
+          "description": "Top-N events by total messages published. Identifies the most active producers. High publish count with low subscriber count may indicate wasteful publishing."
         },
         {
           "id": 107,
@@ -1663,7 +1663,7 @@
               }
             }
           ],
-          "description": "Top 50 events by messages delivered to local subscribers. Shows which events create the most local fanout load. An event that publishes rarely but has many subscribers will rank high here -- it creates more delivery work per publish."
+          "description": "Top-N events by messages delivered to local subscribers. Shows which events create the most local fanout load. An event that publishes rarely but has many subscribers will rank high here -- it creates more delivery work per publish."
         },
         {
           "id": 108,
@@ -1720,7 +1720,7 @@
               }
             }
           ],
-          "description": "Top 50 events by messages sent to remote nodes. Shows which events generate the most inter-node network traffic. Each remote send is one message per node due to the shared subscription optimization. See https://docs.ergo.services/advanced/pub-sub-internals for details."
+          "description": "Top-N events by messages sent to remote nodes. Shows which events generate the most inter-node network traffic. Each remote send is one message per node due to the shared subscription optimization. See https://docs.ergo.services/advanced/pub-sub-internals for details."
         }
       ]
     },
@@ -1739,7 +1739,7 @@
         {
           "id": 85,
           "title": "Message Throughput (Cluster Total)",
-          "description": "Cluster-wide message throughput showing total inbound (received by processes) and outbound (sent by processes) rates. Provides a high-level view of how much work flows through the entire cluster. A sudden drop may indicate stalled processes or upstream failures.",
+          "description": "Cluster-wide message throughput and wakeup rate. In (green): messages received. Out (blue): messages sent. Wakeups (purple dashed): process scheduling frequency. When In >> Wakeups, processes batch multiple messages per wakeup -- high load. When In tracks Wakeups, each message gets its own wakeup -- spare capacity.",
           "type": "timeseries",
           "gridPos": {
             "h": 8,
@@ -1755,6 +1755,10 @@
             {
               "expr": "sum(rate(ergo_process_messages_out{node=~\"$node\"}[5m]))",
               "legendFormat": "Out"
+            },
+            {
+              "expr": "sum(rate(ergo_process_wakeups{node=~\"$node\"}[5m]))",
+              "legendFormat": "Wakeups"
             }
           ],
           "fieldConfig": {
@@ -1797,6 +1801,31 @@
                     }
                   }
                 ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Wakeups"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "purple"
+                    }
+                  },
+                  {
+                    "id": "custom.lineStyle",
+                    "value": {
+                      "fill": "dash",
+                      "dash": [
+                        10,
+                        5
+                      ]
+                    }
+                  }
+                ]
               }
             ]
           },
@@ -1822,7 +1851,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 59
+            "y": 67
           },
           "targets": [
             {
@@ -2005,7 +2034,7 @@
         {
           "id": 82,
           "title": "Message Throughput per Node",
-          "description": "Message throughput per node showing inbound and outbound rates (messages/sec). Provides a node-level view of workload flow. A sudden drop may indicate stalled processes; a spike may precede latency increases.",
+          "description": "Message throughput and wakeup rate per node. Shows inbound, outbound, and wakeup rates. A gap between message rate and wakeup rate on a specific node indicates that node's processes are batching -- under load.",
           "type": "timeseries",
           "gridPos": {
             "h": 8,
@@ -2021,6 +2050,10 @@
             {
               "expr": "rate(ergo_process_messages_out{node=~\"$node\"}[5m])",
               "legendFormat": "{{node}} out"
+            },
+            {
+              "expr": "rate(ergo_process_wakeups{node=~\"$node\"}[5m])",
+              "legendFormat": "{{node}} wakeups"
             }
           ],
           "fieldConfig": {
@@ -2052,7 +2085,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 59
+            "y": 67
           },
           "targets": [
             {
@@ -2092,7 +2125,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 67
+            "y": 75
           },
           "targets": [
             {
@@ -2177,7 +2210,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 67
+            "y": 75
           },
           "targets": [
             {
@@ -2208,7 +2241,7 @@
         {
           "id": 87,
           "title": "Top Processes by Messages In",
-          "description": "Top 50 processes by total messages received (cumulative). Identifies which actors handle the most inbound traffic. Includes messages from other processes, event deliveries, and call requests.",
+          "description": "Top-N processes by total messages received (cumulative). Identifies which actors handle the most inbound traffic. Includes messages from other processes, event deliveries, and call requests.",
           "type": "table",
           "gridPos": {
             "h": 8,
@@ -2270,7 +2303,7 @@
         {
           "id": 88,
           "title": "Top Processes by Messages Out",
-          "description": "Top 50 processes by total messages sent (cumulative). Identifies which actors generate the most outbound traffic. Includes sends to processes, event publishes, call requests, and responses.",
+          "description": "Top-N processes by total messages sent (cumulative). Identifies which actors generate the most outbound traffic. Includes sends to processes, event publishes, call requests, and responses.",
           "type": "table",
           "gridPos": {
             "h": 8,
@@ -2322,6 +2355,106 @@
                 "sort": [
                   {
                     "field": "Messages Out",
+                    "desc": true
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": 89,
+          "title": "Drains per Node",
+          "description": "Average messages per wakeup per node. Computed from aggregate metrics: rate(messages_in) / rate(wakeups). Shows how many messages each wakeup cycle handles on average. Value ~1 means spare capacity. Growing value means processes are batching under load.",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 59
+          },
+          "targets": [
+            {
+              "expr": "rate(ergo_process_messages_in{node=~\"$node\"}[5m]) / rate(ergo_process_wakeups{node=~\"$node\"}[5m])",
+              "legendFormat": "{{node}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "lineInterpolation": "smooth",
+                "fillOpacity": 20,
+                "gradientMode": "opacity"
+              },
+              "color": {
+                "mode": "palette-classic"
+              }
+            }
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right"
+            },
+            "tooltip": {
+              "mode": "single"
+            }
+          }
+        },
+        {
+          "id": 90,
+          "title": "Top Processes by Drains",
+          "description": "Top-N processes by drain ratio (MessagesIn / Wakeups). Shows which processes handle the most messages per wakeup cycle. High drain ratio means the process is continuously busy, handling messages in batches rather than one at a time.",
+          "type": "table",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 59
+          },
+          "targets": [
+            {
+              "expr": "topk(50, ergo_process_drains_top{node=~\"$node\"})",
+              "format": "table",
+              "instant": true
+            }
+          ],
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "__name__": true,
+                  "endpoint": true,
+                  "job": true,
+                  "prometheus": true
+                },
+                "indexByName": {
+                  "application": 0,
+                  "behavior": 1,
+                  "name": 2,
+                  "pid": 3,
+                  "node": 4,
+                  "Value": 5
+                },
+                "renameByName": {
+                  "application": "Application",
+                  "behavior": "Behavior",
+                  "name": "Name",
+                  "pid": "PID",
+                  "node": "Node",
+                  "Value": "Drains"
+                }
+              }
+            },
+            {
+              "id": "sortBy",
+              "options": {
+                "fields": {},
+                "sort": [
+                  {
+                    "field": "Drains",
                     "desc": true
                   }
                 ]
@@ -2553,7 +2686,7 @@
         {
           "id": 17,
           "title": "Top Processes by Init Time",
-          "description": "Top 50 processes by ProcessInit duration. Identifies which actor types take the longest to initialize. Long init times may indicate heavy setup work, blocking I/O, or synchronous calls during initialization.",
+          "description": "Top-N processes by ProcessInit duration. Identifies which actor types take the longest to initialize. Long init times may indicate heavy setup work, blocking I/O, or synchronous calls during initialization.",
           "type": "table",
           "gridPos": {
             "h": 8,
