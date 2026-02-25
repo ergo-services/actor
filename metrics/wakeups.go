@@ -72,7 +72,10 @@ func (wm *wakeupsMetrics) observe(info gen.ProcessShortInfo, topN int) {
 		heap.Fix(wm.heapWakeups, 0)
 	}
 
-	// top-N by drain ratio
+	// top-N by drain ratio (skip processes with no messages)
+	if info.MessagesIn == 0 {
+		return
+	}
 	drain := float64(info.MessagesIn) / float64(info.Wakeups)
 	dEntry := drainsEntry{
 		value:       drain,
