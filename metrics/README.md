@@ -261,6 +261,17 @@ Distribution ranges: 1%, 5%, 10%, 25%, 50%, 75%, 90%, 90%+.
 
 Utilization is computed as `RunningTime / Uptime`. A value of 0.50 means the process has spent 50% of its lifetime executing callbacks. The remaining time was spent waiting for messages. Processes with zero running time or zero uptime are excluded.
 
+### Process Init Time Metrics
+
+The metrics actor tracks how long each process spent in its `ProcessInit` callback. This identifies actors with slow initialization -- heavy setup, blocking I/O, or synchronous calls during init.
+
+No build tags required. Init time metrics are always active.
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `ergo_process_init_time_max_seconds` | Gauge | - | Maximum ProcessInit duration across all processes on this node |
+| `ergo_process_init_time_top_seconds` | Gauge | pid, name, application, behavior | Top-N processes by ProcessInit duration |
+
 ### Process Throughput Metrics
 
 Per-process message throughput top-N and node-level aggregates.
@@ -343,7 +354,7 @@ The dashboard includes a `$node` variable dropdown at the top. It allows selecti
 Six stat panels showing aggregated values for selected nodes:
 
 - **Total Processes** -- total number of processes across selected nodes
-- **Running** -- number of running processes (green). A large gap between Total and Running indicates many processes are idle or waiting
+- **Running** -- number of processes currently executing callbacks or waiting for a Call response. The gap between Total and Running is normal -- most processes spend their time in Sleep state (idle, waiting for messages)
 - **Zombie** -- number of zombie processes (green when 0, red when 1 or more). Non-zero value signals that some processes have terminated abnormally and were not properly cleaned up -- requires investigation
 - **Memory Used** -- total OS memory used across selected nodes
 - **Memory Alloc** -- total runtime memory allocated across selected nodes. A significant difference between Used and Alloc may indicate memory fragmentation or that the runtime is holding memory that could be released
@@ -431,10 +442,10 @@ Two timeseries panels (message throughput overview):
 - **Message Throughput (Cluster Total)** -- cluster-wide message rate showing total inbound (received by processes) and outbound (sent by processes). A sudden drop may indicate stalled processes or upstream failures
 - **Message Throughput per Node** -- message rate per node showing inbound and outbound. Identifies nodes with the highest message flow
 
-Two timeseries panels (message throughput top-N by rate):
+Two table panels (message throughput top-N):
 
-- **Top Processes by Inbound Rate** -- top 10 processes by current inbound message rate (msg/s). Shows which actors are receiving the most messages right now. Compare with mailbox depth -- high rate with low depth means the process handles messages quickly; high rate with growing depth means it's falling behind
-- **Top Processes by Outbound Rate** -- top 10 processes by current outbound message rate (msg/s). Shows which actors generate the most messages right now. High outbound rate identifies the busiest senders -- event producers, dispatchers, coordinators
+- **Top Processes by Messages In** -- top 50 processes by total messages received (cumulative). Identifies which actors handle the most inbound traffic
+- **Top Processes by Messages Out** -- top 50 processes by total messages sent (cumulative). Identifies which actors generate the most outbound traffic
 
 Two timeseries panels (utilization overview):
 
@@ -448,12 +459,14 @@ Two panels (utilization detail):
 
 #### Processes (collapsed row)
 
-A collapsed row containing four timeseries graphs. Click to expand.
+A collapsed row containing six panels. Click to expand.
 
 - **Processes (total)** -- total process count per node. Steady growth without a plateau may indicate a process leak (processes being spawned but never terminated)
 - **Processes (running)** -- running process count per node. Helps identify load distribution across the cluster -- uneven running counts may point to hotspot nodes
 - **Process Spawn Rate** -- rate of successfully spawned processes per node. Also shows failed spawn attempts (in red). Spawn failures indicate resource exhaustion or configuration errors. A sudden spike in spawn rate may signal a restart loop
 - **Process Termination Rate** -- rate of terminated processes per node. When termination rate consistently exceeds spawn rate, the node is draining. When spawn rate exceeds termination rate, process count is growing -- correlate with the Processes panel to verify
+- **Init Time per Node** -- bar gauge showing maximum ProcessInit duration per node. Color indicates severity: green < 100ms, yellow < 1s, red > 1s. Shows at a glance which nodes have slow initialization
+- **Top Processes by Init Time** -- table showing processes with the longest ProcessInit duration. Identifies which actor types take the longest to initialize
 
 #### Resources (collapsed row)
 

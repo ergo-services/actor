@@ -84,6 +84,9 @@ type Actor struct {
 	// Process throughput metrics
 	throughput throughputMetrics
 
+	// Process init time metrics
+	inittime initTimeMetrics
+
 	// Event metrics
 	event eventMetrics
 
@@ -328,6 +331,9 @@ func (a *Actor) initializeMetrics() error {
 	// Initialize process throughput metrics
 	a.throughput.init(a.registry, nodeLabels)
 
+	// Initialize process init time metrics
+	a.inittime.init(a.registry, nodeLabels)
+
 	// Initialize event metrics
 	a.event.init(a.registry, nodeLabels)
 
@@ -474,6 +480,7 @@ func (a *Actor) collectBaseMetrics() error {
 	a.depth.begin()
 	a.utilization.begin()
 	a.throughput.begin()
+	a.inittime.begin()
 
 	var totalMessagesIn uint64
 	var totalMessagesOut uint64
@@ -499,6 +506,9 @@ func (a *Actor) collectBaseMetrics() error {
 		// Process throughput metrics
 		a.throughput.observe(info, topN)
 
+		// Process init time metrics
+		a.inittime.observe(info, topN)
+
 		return true
 	})
 
@@ -506,6 +516,7 @@ func (a *Actor) collectBaseMetrics() error {
 	a.utilization.flush()
 	a.latency.flush()
 	a.throughput.flush()
+	a.inittime.flush()
 
 	// Collect event metrics
 	a.event.begin()

@@ -67,7 +67,7 @@
           }
         }
       },
-      "description": "Running processes across selected nodes. A large gap between Total and Running indicates many processes are idle or waiting for messages in their mailboxes."
+      "description": "Processes currently executing callbacks or waiting for a Call response. The gap between Total and Running is normal -- most processes spend their time in Sleep state (idle, waiting for messages)."
     },
     {
       "id": 3,
@@ -654,6 +654,9 @@
         "legend": {
           "displayMode": "table",
           "placement": "right"
+        },
+        "tooltip": {
+          "mode": "multi"
         }
       },
       "description": "Distribution of processes across latency ranges from 1ms to 60s+. Uses a flame color gradient: green for low (1ms-10ms), yellow for moderate (50ms-100ms), orange for high (500ms-1s), red for critical (5s-60s+). In a healthy system the chart should be mostly green. Growing red/orange areas indicate degradation. Requires -tags=latency."
@@ -1014,6 +1017,9 @@
         "legend": {
           "displayMode": "table",
           "placement": "right"
+        },
+        "tooltip": {
+          "mode": "multi"
         }
       },
       "description": "Distribution of processes across mailbox depth ranges from 1 to 10K+. Uses a flame color gradient: green for low depth (1-10), yellow for moderate (50-100), orange for high (500-1K), red for critical (5K-10K+). A shift toward red indicates growing backpressure."
@@ -1990,6 +1996,9 @@
             "legend": {
               "displayMode": "table",
               "placement": "right"
+            },
+            "tooltip": {
+              "mode": "multi"
             }
           }
         },
@@ -2198,9 +2207,9 @@
         },
         {
           "id": 87,
-          "title": "Top Processes by Inbound Rate",
-          "description": "Top 10 processes by current inbound message rate. Shows which actors are receiving the most messages right now. Compare with mailbox depth -- high rate with low depth means the process handles messages quickly; high rate with growing depth means it's falling behind.",
-          "type": "timeseries",
+          "title": "Top Processes by Messages In",
+          "description": "Top 50 processes by total messages received (cumulative). Identifies which actors handle the most inbound traffic. Includes messages from other processes, event deliveries, and call requests.",
+          "type": "table",
           "gridPos": {
             "h": 8,
             "w": 12,
@@ -2209,38 +2218,60 @@
           },
           "targets": [
             {
-              "expr": "topk(10, rate(ergo_process_messages_in_top{node=~\"$node\"}[5m]))",
-              "legendFormat": "{{behavior}} {{name}} {{pid}}"
+              "expr": "topk(50, ergo_process_messages_in_top{node=~\"$node\"})",
+              "format": "table",
+              "instant": true
             }
           ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "msg/s",
-              "custom": {
-                "lineInterpolation": "smooth",
-                "fillOpacity": 20,
-                "gradientMode": "opacity"
-              },
-              "color": {
-                "mode": "palette-classic"
+          "options": {},
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "__name__": true,
+                  "endpoint": true,
+                  "job": true,
+                  "prometheus": true
+                },
+                "indexByName": {
+                  "application": 0,
+                  "behavior": 1,
+                  "name": 2,
+                  "pid": 3,
+                  "node": 4,
+                  "Value": 5
+                },
+                "renameByName": {
+                  "application": "Application",
+                  "behavior": "Behavior",
+                  "name": "Name",
+                  "pid": "PID",
+                  "node": "Node",
+                  "Value": "Messages In"
+                }
+              }
+            },
+            {
+              "id": "sortBy",
+              "options": {
+                "fields": {},
+                "sort": [
+                  {
+                    "field": "Messages In",
+                    "desc": true
+                  }
+                ]
               }
             }
-          },
-          "options": {
-            "legend": {
-              "displayMode": "table",
-              "placement": "right"
-            },
-            "tooltip": {
-              "mode": "single"
-            }
-          }
+          ]
         },
         {
           "id": 88,
-          "title": "Top Processes by Outbound Rate",
-          "description": "Top 10 processes by current outbound message rate. Shows which actors generate the most messages right now. High outbound rate identifies the busiest senders -- event producers, dispatchers, coordinators.",
-          "type": "timeseries",
+          "title": "Top Processes by Messages Out",
+          "description": "Top 50 processes by total messages sent (cumulative). Identifies which actors generate the most outbound traffic. Includes sends to processes, event publishes, call requests, and responses.",
+          "type": "table",
           "gridPos": {
             "h": 8,
             "w": 12,
@@ -2249,32 +2280,54 @@
           },
           "targets": [
             {
-              "expr": "topk(10, rate(ergo_process_messages_out_top{node=~\"$node\"}[5m]))",
-              "legendFormat": "{{behavior}} {{name}} {{pid}}"
+              "expr": "topk(50, ergo_process_messages_out_top{node=~\"$node\"})",
+              "format": "table",
+              "instant": true
             }
           ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "msg/s",
-              "custom": {
-                "lineInterpolation": "smooth",
-                "fillOpacity": 20,
-                "gradientMode": "opacity"
-              },
-              "color": {
-                "mode": "palette-classic"
+          "options": {},
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "__name__": true,
+                  "endpoint": true,
+                  "job": true,
+                  "prometheus": true
+                },
+                "indexByName": {
+                  "application": 0,
+                  "behavior": 1,
+                  "name": 2,
+                  "pid": 3,
+                  "node": 4,
+                  "Value": 5
+                },
+                "renameByName": {
+                  "application": "Application",
+                  "behavior": "Behavior",
+                  "name": "Name",
+                  "pid": "PID",
+                  "node": "Node",
+                  "Value": "Messages Out"
+                }
+              }
+            },
+            {
+              "id": "sortBy",
+              "options": {
+                "fields": {},
+                "sort": [
+                  {
+                    "field": "Messages Out",
+                    "desc": true
+                  }
+                ]
               }
             }
-          },
-          "options": {
-            "legend": {
-              "displayMode": "table",
-              "placement": "right"
-            },
-            "tooltip": {
-              "mode": "single"
-            }
-          }
+          ]
         }
       ]
     },
@@ -2440,6 +2493,139 @@
             }
           },
           "description": "Process termination rate per node. When termination consistently exceeds spawn rate, the node is draining. When spawn exceeds termination, process count is growing."
+        },
+        {
+          "id": 16,
+          "title": "Init Time per Node",
+          "description": "Maximum ProcessInit duration per node as a bar gauge. Color indicates severity: green < 100ms, yellow < 1s, red > 1s. Shows which nodes have the slowest process initialization.",
+          "type": "bargauge",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 60
+          },
+          "targets": [
+            {
+              "expr": "ergo_process_init_time_max_seconds{node=~\"$node\"}",
+              "legendFormat": "{{node}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "thresholds"
+              },
+              "thresholds": {
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 0.1
+                  },
+                  {
+                    "color": "orange",
+                    "value": 0.5
+                  },
+                  {
+                    "color": "red",
+                    "value": 1
+                  }
+                ]
+              }
+            }
+          },
+          "options": {
+            "displayMode": "gradient",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "showUnfilled": true
+          }
+        },
+        {
+          "id": 17,
+          "title": "Top Processes by Init Time",
+          "description": "Top 50 processes by ProcessInit duration. Identifies which actor types take the longest to initialize. Long init times may indicate heavy setup work, blocking I/O, or synchronous calls during initialization.",
+          "type": "table",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 60
+          },
+          "targets": [
+            {
+              "expr": "topk(50, ergo_process_init_time_top_seconds{node=~\"$node\"})",
+              "format": "table",
+              "instant": true
+            }
+          ],
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "__name__": true,
+                  "endpoint": true,
+                  "job": true,
+                  "prometheus": true
+                },
+                "indexByName": {
+                  "application": 0,
+                  "behavior": 1,
+                  "name": 2,
+                  "pid": 3,
+                  "node": 4,
+                  "Value": 5
+                },
+                "renameByName": {
+                  "application": "Application",
+                  "behavior": "Behavior",
+                  "name": "Name",
+                  "pid": "PID",
+                  "node": "Node",
+                  "Value": "Init Time"
+                }
+              }
+            },
+            {
+              "id": "sortBy",
+              "options": {
+                "fields": {},
+                "sort": [
+                  {
+                    "field": "Init Time",
+                    "desc": true
+                  }
+                ]
+              }
+            }
+          ],
+          "fieldConfig": {
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Init Time"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "s"
+                  }
+                ]
+              }
+            ]
+          }
         }
       ]
     },
