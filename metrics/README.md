@@ -142,7 +142,8 @@ func (m *MyMetrics) CollectMetrics() error {
 | `ergo_registered_names_total` | Gauge | Total registered process names |
 | `ergo_registered_aliases_total` | Gauge | Total registered aliases |
 | `ergo_registered_events_total` | Gauge | Total registered events |
-| `ergo_events_published_total` | Gauge | Cumulative number of events published. Includes both local producer publishes and events arriving from remote nodes |
+| `ergo_events_published_total` | Gauge | Cumulative number of events published by local producers |
+| `ergo_events_received_total` | Gauge | Cumulative number of events received from remote nodes |
 | `ergo_events_local_sent_total` | Gauge | Cumulative number of event messages delivered to local subscribers. Reflects actual fanout -- one publish with 100 subscribers produces 100 local deliveries |
 | `ergo_events_remote_sent_total` | Gauge | Cumulative number of event messages sent to remote nodes. Counts one per node, not per subscriber, due to shared subscription optimization |
 
@@ -426,7 +427,7 @@ A collapsed row containing ten panels. Click to expand. Organized from general t
 
 Two timeseries panels (cluster-wide overview):
 
-- **Event Publish/Delivery Rate** -- three lines showing `rate()` of published, local delivered, and remote sent event messages. Published (blue) shows how often producers publish. Local Delivered (green) shows the actual fanout to local subscribers -- this is typically much higher than Published when events have many subscribers. Remote Sent (orange) shows messages sent to other nodes (one per node due to shared subscription optimization). A growing gap between Local Delivered and Published indicates increasing fanout load
+- **Event Publish/Delivery Rate** -- four lines showing event throughput. Published (blue) shows how often local producers publish. Received (cyan) shows events arriving from remote nodes. Local Delivered (green) shows actual fanout to local subscribers. Remote Sent (orange) shows messages sent to other nodes (one per node due to shared subscription optimization)
 - **Event Utilization** -- stacked timeseries showing the utilization state of all registered events. Active (green): publishing with subscribers -- event is working. On Demand (blue): uses Notify mechanism, waiting for subscribers or data -- correct behavior. Idle (grey): registered without Notify, no publishes, no subscribers -- potentially forgotten. No Subscribers (orange): publishing but nobody listening. No Publishing (yellow): subscribers waiting but producer never published. The total height equals the total number of registered events. A healthy system is mostly green and blue
 
 Two timeseries panels (per-node rates):

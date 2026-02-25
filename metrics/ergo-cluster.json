@@ -1121,6 +1121,10 @@
               "legendFormat": "Published"
             },
             {
+              "expr": "sum(rate(ergo_events_received_total{node=~\"$node\"}[5m]))",
+              "legendFormat": "Received"
+            },
+            {
               "expr": "sum(rate(ergo_events_local_sent_total{node=~\"$node\"}[5m]))",
               "legendFormat": "Local Delivered"
             },
@@ -1184,6 +1188,21 @@
                     }
                   }
                 ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Received"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "cyan"
+                    }
+                  }
+                ]
               }
             ]
           },
@@ -1199,7 +1218,7 @@
               "mode": "multi"
             }
           },
-          "description": "Cluster-wide event throughput. Published (blue) shows how often producers publish. Local Delivered (green) shows actual fanout to local subscribers -- one publish with many subscribers produces many deliveries. Remote Sent (orange) counts one message per remote node due to shared subscription optimization. See https://docs.ergo.services/advanced/pub-sub-internals for the delivery model."
+          "description": "Cluster-wide event throughput. Published (blue): events published by local producers. Received (cyan): events arriving from remote nodes. Local Delivered (green): actual fanout to local subscribers. Remote Sent (orange): messages sent to remote nodes (one per node due to shared subscriptions). In a fully monitored cluster, Published should match the sum of events that other nodes Receive. See https://docs.ergo.services/advanced/pub-sub-internals for the delivery model."
         },
         {
           "id": 109,

@@ -69,6 +69,7 @@ type Actor struct {
 	registeredAliases   prometheus.Gauge
 	registeredEvents    prometheus.Gauge
 	eventsPublished     prometheus.Gauge
+	eventsReceived      prometheus.Gauge
 	eventsLocalSent     prometheus.Gauge
 	eventsRemoteSent    prometheus.Gauge
 
@@ -262,7 +263,12 @@ func (a *Actor) initializeMetrics() error {
 	})
 	a.eventsPublished = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name:        "ergo_events_published_total",
-		Help:        "Cumulative number of events published",
+		Help:        "Cumulative number of events published by local producers",
+		ConstLabels: nodeLabels,
+	})
+	a.eventsReceived = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name:        "ergo_events_received_total",
+		Help:        "Cumulative number of events received from remote nodes",
 		ConstLabels: nodeLabels,
 	})
 	a.eventsLocalSent = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -386,6 +392,7 @@ func (a *Actor) initializeMetrics() error {
 		a.registeredAliases,
 		a.registeredEvents,
 		a.eventsPublished,
+		a.eventsReceived,
 		a.eventsLocalSent,
 		a.eventsRemoteSent,
 		a.connectedNodes,
@@ -454,6 +461,7 @@ func (a *Actor) collectBaseMetrics() error {
 	a.registeredAliases.Set(float64(nodeInfo.RegisteredAliases))
 	a.registeredEvents.Set(float64(nodeInfo.RegisteredEvents))
 	a.eventsPublished.Set(float64(nodeInfo.EventsPublished))
+	a.eventsReceived.Set(float64(nodeInfo.EventsReceived))
 	a.eventsLocalSent.Set(float64(nodeInfo.EventsLocalSent))
 	a.eventsRemoteSent.Set(float64(nodeInfo.EventsRemoteSent))
 
