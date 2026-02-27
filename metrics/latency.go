@@ -5,6 +5,7 @@ package metrics
 import (
 	"container/heap"
 	"fmt"
+	"sync"
 
 	"ergo.services/ergo/gen"
 
@@ -32,10 +33,7 @@ func init() {
 }
 
 type latencyMetrics struct {
-	distribution  *prometheus.GaugeVec
-	maxLatency    prometheus.Gauge
-	stressedCount prometheus.Gauge
-	topLatency    *prometheus.GaugeVec
+	cm *sync.Map
 
 	// per-cycle accumulators
 	maxLat   float64
@@ -44,43 +42,28 @@ type latencyMetrics struct {
 	heap     *topNHeap
 }
 
-func (lm *latencyMetrics) init(registry *prometheus.Registry, nodeLabels prometheus.Labels) {
-	lm.distribution = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:        "ergo_mailbox_latency_distribution",
-			Help:        "Number of processes by mailbox latency range (snapshot per collect cycle)",
-			ConstLabels: nodeLabels,
-		},
-		[]string{"range"},
-	)
+func (lm *latencyMetrics) init(cm *sync.Map, registry *prometheus.Registry, nodeLabels prometheus.Labels) {
+	lm.cm = cm
 
-	lm.maxLatency = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_mailbox_latency_max_seconds",
-		Help:        "Maximum mailbox latency across all processes on this node",
-		ConstLabels: nodeLabels,
-	})
+	registerInternalGaugeVec(cm, registry,
+		"ergo_mailbox_latency_distribution",
+		"Number of processes by mailbox latency range (snapshot per collect cycle)",
+		nodeLabels, []string{"range"})
 
-	lm.stressedCount = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_mailbox_latency_processes",
-		Help:        "Number of processes with non-empty mailbox (latency > 0)",
-		ConstLabels: nodeLabels,
-	})
+	registerInternalGauge(cm, registry,
+		"ergo_mailbox_latency_max_seconds",
+		"Maximum mailbox latency across all processes on this node",
+		nodeLabels)
 
-	lm.topLatency = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:        "ergo_mailbox_latency_top_seconds",
-			Help:        "Top-N processes by mailbox latency",
-			ConstLabels: nodeLabels,
-		},
-		[]string{"pid", "name", "application", "behavior"},
-	)
+	registerInternalGauge(cm, registry,
+		"ergo_mailbox_latency_processes",
+		"Number of processes with non-empty mailbox (latency > 0)",
+		nodeLabels)
 
-	registry.MustRegister(
-		lm.distribution,
-		lm.maxLatency,
-		lm.stressedCount,
-		lm.topLatency,
-	)
+	registerInternalGaugeVec(cm, registry,
+		"ergo_mailbox_latency_top_seconds",
+		"Top-N processes by mailbox latency",
+		nodeLabels, []string{"pid", "name", "application", "behavior"})
 }
 
 func (lm *latencyMetrics) begin() {
@@ -132,16 +115,18 @@ func (lm *latencyMetrics) observe(info gen.ProcessShortInfo, topN int) {
 }
 
 func (lm *latencyMetrics) flush() {
-	lm.maxLatency.Set(lm.maxLat)
-	lm.stressedCount.Set(lm.stressed)
+	gaugeFromMap(lm.cm, "ergo_mailbox_latency_max_seconds").Set(lm.maxLat)
+	gaugeFromMap(lm.cm, "ergo_mailbox_latency_processes").Set(lm.stressed)
 
+	distribution := gaugeVecFromMap(lm.cm, "ergo_mailbox_latency_distribution")
 	for i, label := range latencyRangeLabels {
-		lm.distribution.WithLabelValues(label).Set(lm.buckets[i])
+		distribution.WithLabelValues(label).Set(lm.buckets[i])
 	}
 
-	lm.topLatency.Reset()
+	topLatency := gaugeVecFromMap(lm.cm, "ergo_mailbox_latency_top_seconds")
+	topLatency.Reset()
 	for _, e := range *lm.heap {
-		lm.topLatency.WithLabelValues(
+		topLatency.WithLabelValues(
 			e.pid,
 			e.name,
 			e.application,

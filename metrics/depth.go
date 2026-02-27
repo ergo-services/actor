@@ -3,6 +3,7 @@ package metrics
 import (
 	"container/heap"
 	"fmt"
+	"sync"
 
 	"ergo.services/ergo/gen"
 
@@ -28,9 +29,7 @@ func init() {
 }
 
 type depthMetrics struct {
-	distribution *prometheus.GaugeVec
-	maxDepth     prometheus.Gauge
-	topDepth     *prometheus.GaugeVec
+	cm *sync.Map
 
 	// per-cycle accumulators
 	max     uint64
@@ -38,36 +37,23 @@ type depthMetrics struct {
 	heap    *depthHeap
 }
 
-func (dm *depthMetrics) init(registry *prometheus.Registry, nodeLabels prometheus.Labels) {
-	dm.distribution = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:        "ergo_mailbox_depth_distribution",
-			Help:        "Number of processes by mailbox queue depth range (snapshot per collect cycle)",
-			ConstLabels: nodeLabels,
-		},
-		[]string{"range"},
-	)
+func (dm *depthMetrics) init(cm *sync.Map, registry *prometheus.Registry, nodeLabels prometheus.Labels) {
+	dm.cm = cm
 
-	dm.maxDepth = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_mailbox_depth_max",
-		Help:        "Maximum mailbox queue depth across all processes on this node",
-		ConstLabels: nodeLabels,
-	})
+	registerInternalGaugeVec(cm, registry,
+		"ergo_mailbox_depth_distribution",
+		"Number of processes by mailbox queue depth range (snapshot per collect cycle)",
+		nodeLabels, []string{"range"})
 
-	dm.topDepth = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:        "ergo_mailbox_depth_top",
-			Help:        "Top-N processes by mailbox queue depth",
-			ConstLabels: nodeLabels,
-		},
-		[]string{"pid", "name", "application", "behavior"},
-	)
+	registerInternalGauge(cm, registry,
+		"ergo_mailbox_depth_max",
+		"Maximum mailbox queue depth across all processes on this node",
+		nodeLabels)
 
-	registry.MustRegister(
-		dm.distribution,
-		dm.maxDepth,
-		dm.topDepth,
-	)
+	registerInternalGaugeVec(cm, registry,
+		"ergo_mailbox_depth_top",
+		"Top-N processes by mailbox queue depth",
+		nodeLabels, []string{"pid", "name", "application", "behavior"})
 }
 
 func (dm *depthMetrics) begin() {
@@ -116,15 +102,17 @@ func (dm *depthMetrics) observe(info gen.ProcessShortInfo, topN int) {
 }
 
 func (dm *depthMetrics) flush() {
-	dm.maxDepth.Set(float64(dm.max))
+	gaugeFromMap(dm.cm, "ergo_mailbox_depth_max").Set(float64(dm.max))
 
+	distribution := gaugeVecFromMap(dm.cm, "ergo_mailbox_depth_distribution")
 	for i, label := range depthRangeLabels {
-		dm.distribution.WithLabelValues(label).Set(dm.buckets[i])
+		distribution.WithLabelValues(label).Set(dm.buckets[i])
 	}
 
-	dm.topDepth.Reset()
+	topDepth := gaugeVecFromMap(dm.cm, "ergo_mailbox_depth_top")
+	topDepth.Reset()
 	for _, e := range *dm.heap {
-		dm.topDepth.WithLabelValues(
+		topDepth.WithLabelValues(
 			e.pid,
 			e.name,
 			e.application,

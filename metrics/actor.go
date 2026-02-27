@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"sync"
 
 	"ergo.services/ergo/gen"
 	"ergo.services/ergo/lib"
@@ -39,6 +40,15 @@ func (a *Actor) Registry() *prometheus.Registry {
 	return a.registry
 }
 
+// customMetrics returns the sync.Map used for custom metric storage.
+// When Shared is set, returns the shared map; otherwise returns the local map.
+func (a *Actor) customMetrics() *sync.Map {
+	if a.options.Shared != nil {
+		return &a.options.Shared.custom
+	}
+	return &a.custom
+}
+
 // Actor implements gen.ProcessBehavior
 type Actor struct {
 	gen.Process
@@ -50,63 +60,64 @@ type Actor struct {
 
 	registry *prometheus.Registry
 
-	// Node metrics
-	nodeUptime          prometheus.Gauge
-	processesTotal      prometheus.Gauge
-	processesRunning    prometheus.Gauge
-	processesZombie      prometheus.Gauge
-	processesSpawned     prometheus.Gauge
-	processesSpawnFailed prometheus.Gauge
-	processesTerminated  prometheus.Gauge
-	memoryUsed           prometheus.Gauge
-	memoryAlloc         prometheus.Gauge
-	userTime            prometheus.Gauge
-	systemTime          prometheus.Gauge
-	cpuCores            prometheus.Gauge
-	applicationsTotal   prometheus.Gauge
-	applicationsRunning prometheus.Gauge
-	registeredNames     prometheus.Gauge
-	registeredAliases   prometheus.Gauge
-	registeredEvents    prometheus.Gauge
-	eventsPublished     prometheus.Gauge
-	eventsReceived      prometheus.Gauge
-	eventsLocalSent     prometheus.Gauge
-	eventsRemoteSent    prometheus.Gauge
-
-	// Latency metrics (enabled with -tags=latency)
-	latency latencyMetrics
-
-	// Mailbox depth metrics
-	depth depthMetrics
-
-	// Process utilization metrics
+	// Sub-metric collectors (computation state only, prometheus objects in customMetrics map)
+	latency     latencyMetrics
+	depth       depthMetrics
 	utilization utilizationMetrics
+	throughput  throughputMetrics
+	inittime    initTimeMetrics
+	wakeups     wakeupsMetrics
+	event       eventMetrics
 
-	// Process throughput metrics
-	throughput throughputMetrics
+	// Custom metrics storage (standalone mode; shared mode uses Shared.custom)
+	custom sync.Map // string -> *registeredMetric
+}
 
-	// Process init time metrics
-	inittime initTimeMetrics
+//
+// internal metric registration and lookup helpers
+//
 
-	// Process wakeups metrics
-	wakeups wakeupsMetrics
+func registerInternalGauge(cm *sync.Map, registry *prometheus.Registry, name, help string, constLabels prometheus.Labels) {
+	g := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name:        name,
+		Help:        help,
+		ConstLabels: constLabels,
+	})
+	registry.MustRegister(g)
+	cm.Store(name, &registeredMetric{
+		name:       name,
+		metricType: MetricGauge,
+		collector:  g,
+		gauge:      g,
+		internal:   true,
+	})
+}
 
-	// Event metrics
-	event eventMetrics
+func registerInternalGaugeVec(cm *sync.Map, registry *prometheus.Registry, name, help string, constLabels prometheus.Labels, labels []string) {
+	gv := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name:        name,
+		Help:        help,
+		ConstLabels: constLabels,
+	}, labels)
+	registry.MustRegister(gv)
+	cm.Store(name, &registeredMetric{
+		name:       name,
+		metricType: MetricGauge,
+		labelNames: labels,
+		collector:  gv,
+		gaugeVec:   gv,
+		internal:   true,
+	})
+}
 
-	// Process aggregate metrics
-	processMessagesIn  prometheus.Gauge
-	processMessagesOut prometheus.Gauge
-	processRunningTime prometheus.Gauge
-	processWakeups     prometheus.Gauge
+func gaugeFromMap(cm *sync.Map, name string) prometheus.Gauge {
+	v, _ := cm.Load(name)
+	return v.(*registeredMetric).gauge
+}
 
-	// Network metrics
-	connectedNodes    prometheus.Gauge
-	remoteNodeUptime  *prometheus.GaugeVec
-	remoteMessagesIn  *prometheus.GaugeVec
-	remoteMessagesOut *prometheus.GaugeVec
-	remoteBytesIn     *prometheus.GaugeVec
-	remoteBytesOut    *prometheus.GaugeVec
+func gaugeVecFromMap(cm *sync.Map, name string) *prometheus.GaugeVec {
+	v, _ := cm.Load(name)
+	return v.(*registeredMetric).gaugeVec
 }
 
 //
@@ -135,24 +146,34 @@ func (a *Actor) ProcessInit(process gen.Process, args ...any) (rr error) {
 		}()
 	}
 
-	a.registry = prometheus.NewRegistry()
-
-	// Initialize base Prometheus metrics
-	if err := a.initializeMetrics(); err != nil {
-		return err
-	}
-
 	options, err := a.behavior.Init(args...)
 	if err != nil {
 		return err
 	}
 
 	a.options = options
-	if a.options.Port < 1 {
-		a.options.Port = DefaultPort
+
+	// Determine role based on Shared/Port/Mux configuration
+	isPrimary := a.options.Shared != nil && (a.options.Port > 0 || a.options.Mux != nil)
+	isStandalone := a.options.Shared == nil
+
+	// Registry: shared or own
+	a.registry = prometheus.NewRegistry()
+	if a.options.Shared != nil {
+		a.registry = a.options.Shared.Registry()
 	}
-	if a.options.Host == "" {
-		a.options.Host = DefaultHost
+
+	// Defaults: only apply Port/Host defaults in standalone mode
+	if isStandalone {
+		if a.options.Port < 1 {
+			a.options.Port = DefaultPort
+		}
+		if a.options.Host == "" {
+			a.options.Host = DefaultHost
+		}
+	}
+	if a.options.Path == "" {
+		a.options.Path = DefaultPath
 	}
 	if a.options.CollectInterval < 1 {
 		a.options.CollectInterval = DefaultCollectInterval
@@ -161,258 +182,88 @@ func (a *Actor) ProcessInit(process gen.Process, args ...any) (rr error) {
 		a.options.TopN = DefaultTopN
 	}
 
-	// Start HTTP server for /metrics endpoint
-	if err := a.startHTTPServer(); err != nil {
-		return err
+	// Primary/standalone: base metrics + HTTP + collection timer.
+	// Workers: only handle custom metric messages, nothing to init.
+	if isStandalone || isPrimary {
+		if err := a.initializeErgoMetrics(); err != nil {
+			return err
+		}
+		if err := a.startHTTPServer(); err != nil {
+			return err
+		}
+		a.Send(a.PID(), messageCollectMetrics{})
 	}
-
-	a.Send(a.PID(), messageCollectMetrics{})
 
 	return nil
 }
 
-func (a *Actor) initializeMetrics() error {
+func (a *Actor) initializeErgoMetrics() error {
+	cm := a.customMetrics()
 	nodeName := string(a.Node().Name())
 	nodeLabels := prometheus.Labels{"node": nodeName}
 
 	// Node metrics
-	a.nodeUptime = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_node_uptime_seconds",
-		Help:        "Node uptime in seconds",
-		ConstLabels: nodeLabels,
-	})
-	a.processesTotal = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_processes_total",
-		Help:        "Total number of processes",
-		ConstLabels: nodeLabels,
-	})
-	a.processesRunning = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_processes_running",
-		Help:        "Number of running processes",
-		ConstLabels: nodeLabels,
-	})
-	a.processesZombie = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_processes_zombie",
-		Help:        "Number of zombie processes",
-		ConstLabels: nodeLabels,
-	})
-	a.processesSpawned = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_processes_spawned_total",
-		Help:        "Cumulative number of successfully spawned processes",
-		ConstLabels: nodeLabels,
-	})
-	a.processesSpawnFailed = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_processes_spawn_failed_total",
-		Help:        "Cumulative number of failed spawn attempts",
-		ConstLabels: nodeLabels,
-	})
-	a.processesTerminated = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_processes_terminated_total",
-		Help:        "Cumulative number of terminated processes",
-		ConstLabels: nodeLabels,
-	})
-	a.memoryUsed = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_memory_used_bytes",
-		Help:        "Memory used in bytes",
-		ConstLabels: nodeLabels,
-	})
-	a.memoryAlloc = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_memory_alloc_bytes",
-		Help:        "Memory allocated in bytes",
-		ConstLabels: nodeLabels,
-	})
-	a.userTime = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_cpu_user_seconds",
-		Help:        "User CPU time in seconds",
-		ConstLabels: nodeLabels,
-	})
-	a.systemTime = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_cpu_system_seconds",
-		Help:        "System CPU time in seconds",
-		ConstLabels: nodeLabels,
-	})
-	a.cpuCores = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_cpu_cores",
-		Help:        "Number of CPU cores available",
-		ConstLabels: nodeLabels,
-	})
-	a.applicationsTotal = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_applications_total",
-		Help:        "Total number of applications",
-		ConstLabels: nodeLabels,
-	})
-	a.applicationsRunning = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_applications_running",
-		Help:        "Number of running applications",
-		ConstLabels: nodeLabels,
-	})
-	a.registeredNames = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_registered_names_total",
-		Help:        "Total number of registered names",
-		ConstLabels: nodeLabels,
-	})
-	a.registeredAliases = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_registered_aliases_total",
-		Help:        "Total number of registered aliases",
-		ConstLabels: nodeLabels,
-	})
-	a.registeredEvents = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_registered_events_total",
-		Help:        "Total number of registered events",
-		ConstLabels: nodeLabels,
-	})
-	a.eventsPublished = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_events_published_total",
-		Help:        "Cumulative number of events published by local producers",
-		ConstLabels: nodeLabels,
-	})
-	a.eventsReceived = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_events_received_total",
-		Help:        "Cumulative number of events received from remote nodes",
-		ConstLabels: nodeLabels,
-	})
-	a.eventsLocalSent = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_events_local_sent_total",
-		Help:        "Cumulative number of event messages sent to local subscribers",
-		ConstLabels: nodeLabels,
-	})
-	a.eventsRemoteSent = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_events_remote_sent_total",
-		Help:        "Cumulative number of event messages sent to remote subscribers",
-		ConstLabels: nodeLabels,
-	})
+	registerInternalGauge(cm, a.registry, "ergo_node_uptime_seconds", "Node uptime in seconds", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_processes_total", "Total number of processes", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_processes_running", "Number of running processes", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_processes_zombie", "Number of zombie processes", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_processes_spawned_total", "Cumulative number of successfully spawned processes", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_processes_spawn_failed_total", "Cumulative number of failed spawn attempts", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_processes_terminated_total", "Cumulative number of terminated processes", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_memory_used_bytes", "Memory used in bytes", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_memory_alloc_bytes", "Memory allocated in bytes", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_cpu_user_seconds", "User CPU time in seconds", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_cpu_system_seconds", "System CPU time in seconds", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_cpu_cores", "Number of CPU cores available", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_applications_total", "Total number of applications", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_applications_running", "Number of running applications", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_registered_names_total", "Total number of registered names", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_registered_aliases_total", "Total number of registered aliases", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_registered_events_total", "Total number of registered events", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_events_published_total", "Cumulative number of events published by local producers", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_events_received_total", "Cumulative number of events received from remote nodes", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_events_local_sent_total", "Cumulative number of event messages sent to local subscribers", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_events_remote_sent_total", "Cumulative number of event messages sent to remote subscribers", nodeLabels)
 
 	// Network metrics
-	a.connectedNodes = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_connected_nodes_total",
-		Help:        "Total number of connected nodes",
-		ConstLabels: nodeLabels,
-	})
-	a.remoteNodeUptime = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:        "ergo_remote_node_uptime_seconds",
-			Help:        "Remote node uptime in seconds",
-			ConstLabels: nodeLabels,
-		},
-		[]string{"remote_node"},
-	)
-	a.remoteMessagesIn = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:        "ergo_remote_messages_in_total",
-			Help:        "Total number of messages received from remote node",
-			ConstLabels: nodeLabels,
-		},
-		[]string{"remote_node"},
-	)
-	a.remoteMessagesOut = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:        "ergo_remote_messages_out_total",
-			Help:        "Total number of messages sent to remote node",
-			ConstLabels: nodeLabels,
-		},
-		[]string{"remote_node"},
-	)
-	a.remoteBytesIn = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:        "ergo_remote_bytes_in_total",
-			Help:        "Total number of bytes received from remote node",
-			ConstLabels: nodeLabels,
-		},
-		[]string{"remote_node"},
-	)
-	a.remoteBytesOut = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:        "ergo_remote_bytes_out_total",
-			Help:        "Total number of bytes sent to remote node",
-			ConstLabels: nodeLabels,
-		},
-		[]string{"remote_node"},
-	)
+	registerInternalGauge(cm, a.registry, "ergo_connected_nodes_total", "Total number of connected nodes", nodeLabels)
+	registerInternalGaugeVec(cm, a.registry, "ergo_remote_node_uptime_seconds", "Remote node uptime in seconds", nodeLabels, []string{"remote_node"})
+	registerInternalGaugeVec(cm, a.registry, "ergo_remote_messages_in_total", "Total number of messages received from remote node", nodeLabels, []string{"remote_node"})
+	registerInternalGaugeVec(cm, a.registry, "ergo_remote_messages_out_total", "Total number of messages sent to remote node", nodeLabels, []string{"remote_node"})
+	registerInternalGaugeVec(cm, a.registry, "ergo_remote_bytes_in_total", "Total number of bytes received from remote node", nodeLabels, []string{"remote_node"})
+	registerInternalGaugeVec(cm, a.registry, "ergo_remote_bytes_out_total", "Total number of bytes sent to remote node", nodeLabels, []string{"remote_node"})
 
-	// Initialize latency metrics (no-op without -tags=latency)
-	a.latency.init(a.registry, nodeLabels)
-
-	// Initialize mailbox depth metrics
-	a.depth.init(a.registry, nodeLabels)
-
-	// Initialize process utilization metrics
-	a.utilization.init(a.registry, nodeLabels)
-
-	// Initialize process throughput metrics
-	a.throughput.init(a.registry, nodeLabels)
-
-	// Initialize process init time metrics
-	a.inittime.init(a.registry, nodeLabels)
-
-	// Initialize process wakeups metrics
-	a.wakeups.init(a.registry, nodeLabels)
-
-	// Initialize event metrics
-	a.event.init(a.registry, nodeLabels)
+	// Initialize sub-metric collectors
+	a.latency.init(cm, a.registry, nodeLabels)
+	a.depth.init(cm, a.registry, nodeLabels)
+	a.utilization.init(cm, a.registry, nodeLabels)
+	a.throughput.init(cm, a.registry, nodeLabels)
+	a.inittime.init(cm, a.registry, nodeLabels)
+	a.wakeups.init(cm, a.registry, nodeLabels)
+	a.event.init(cm, a.registry, nodeLabels)
 
 	// Process aggregate metrics
-	a.processMessagesIn = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_process_messages_in",
-		Help:        "Sum of messages received by all processes on this node",
-		ConstLabels: nodeLabels,
-	})
-	a.processMessagesOut = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_process_messages_out",
-		Help:        "Sum of messages sent by all processes on this node",
-		ConstLabels: nodeLabels,
-	})
-	a.processRunningTime = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_process_running_time_seconds",
-		Help:        "Sum of callback running time across all processes on this node",
-		ConstLabels: nodeLabels,
-	})
-	a.processWakeups = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_process_wakeups",
-		Help:        "Sum of wakeups (Sleep to Running transitions) across all processes on this node",
-		ConstLabels: nodeLabels,
-	})
-
-	// Register all base metrics
-	a.registry.MustRegister(
-		a.nodeUptime,
-		a.processesTotal,
-		a.processesRunning,
-		a.processesZombie,
-		a.processesSpawned,
-		a.processesSpawnFailed,
-		a.processesTerminated,
-		a.memoryUsed,
-		a.memoryAlloc,
-		a.userTime,
-		a.systemTime,
-		a.cpuCores,
-		a.applicationsTotal,
-		a.applicationsRunning,
-		a.registeredNames,
-		a.registeredAliases,
-		a.registeredEvents,
-		a.eventsPublished,
-		a.eventsReceived,
-		a.eventsLocalSent,
-		a.eventsRemoteSent,
-		a.connectedNodes,
-		a.remoteNodeUptime,
-		a.remoteMessagesIn,
-		a.remoteMessagesOut,
-		a.remoteBytesIn,
-		a.remoteBytesOut,
-		a.processMessagesIn,
-		a.processMessagesOut,
-		a.processRunningTime,
-		a.processWakeups,
-	)
+	registerInternalGauge(cm, a.registry, "ergo_process_messages_in", "Sum of messages received by all processes on this node", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_process_messages_out", "Sum of messages sent by all processes on this node", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_process_running_time_seconds", "Sum of callback running time across all processes on this node", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_process_wakeups", "Sum of wakeups (Sleep to Running transitions) across all processes on this node", nodeLabels)
 
 	return nil
 }
 
 func (a *Actor) startHTTPServer() error {
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.HandlerFor(a.registry, promhttp.HandlerOpts{}))
+	mux := a.options.Mux
+	if mux == nil {
+		mux = http.NewServeMux()
+	}
+
+	mux.Handle(a.options.Path, promhttp.HandlerFor(a.registry, promhttp.HandlerOpts{}))
+
+	if a.options.Mux != nil {
+		// external mux provided, skip starting own server
+		a.Log().Debug("metrics handler registered on external mux at %s", a.options.Path)
+		return nil
+	}
 
 	serverOptions := meta.WebServerOptions{
 		Port:    a.options.Port,
@@ -431,11 +282,13 @@ func (a *Actor) startHTTPServer() error {
 		return err
 	}
 
-	a.Log().Debug("metrics HTTP server started at http://%s:%d/metrics", a.options.Host, a.options.Port)
+	a.Log().Debug("metrics HTTP server started at http://%s:%d%s", a.options.Host, a.options.Port, a.options.Path)
 	return nil
 }
 
 func (a *Actor) collectBaseMetrics() error {
+	cm := a.customMetrics()
+
 	// Get node information
 	nodeInfo, err := a.Node().Info()
 	if err != nil {
@@ -443,41 +296,47 @@ func (a *Actor) collectBaseMetrics() error {
 	}
 
 	// Update node metrics
-	a.nodeUptime.Set(float64(nodeInfo.Uptime))
-	a.processesTotal.Set(float64(nodeInfo.ProcessesTotal))
-	a.processesRunning.Set(float64(nodeInfo.ProcessesRunning))
-	a.processesZombie.Set(float64(nodeInfo.ProcessesZombee))
-	a.processesSpawned.Set(float64(nodeInfo.ProcessesSpawned))
-	a.processesSpawnFailed.Set(float64(nodeInfo.ProcessesSpawnFailed))
-	a.processesTerminated.Set(float64(nodeInfo.ProcessesTerminated))
-	a.memoryUsed.Set(float64(nodeInfo.MemoryUsed))
-	a.memoryAlloc.Set(float64(nodeInfo.MemoryAlloc))
-	a.userTime.Set(float64(nodeInfo.UserTime) / 1e9)
-	a.systemTime.Set(float64(nodeInfo.SystemTime) / 1e9)
-	a.cpuCores.Set(float64(runtime.NumCPU()))
-	a.applicationsTotal.Set(float64(nodeInfo.ApplicationsTotal))
-	a.applicationsRunning.Set(float64(nodeInfo.ApplicationsRunning))
-	a.registeredNames.Set(float64(nodeInfo.RegisteredNames))
-	a.registeredAliases.Set(float64(nodeInfo.RegisteredAliases))
-	a.registeredEvents.Set(float64(nodeInfo.RegisteredEvents))
-	a.eventsPublished.Set(float64(nodeInfo.EventsPublished))
-	a.eventsReceived.Set(float64(nodeInfo.EventsReceived))
-	a.eventsLocalSent.Set(float64(nodeInfo.EventsLocalSent))
-	a.eventsRemoteSent.Set(float64(nodeInfo.EventsRemoteSent))
+	gaugeFromMap(cm, "ergo_node_uptime_seconds").Set(float64(nodeInfo.Uptime))
+	gaugeFromMap(cm, "ergo_processes_total").Set(float64(nodeInfo.ProcessesTotal))
+	gaugeFromMap(cm, "ergo_processes_running").Set(float64(nodeInfo.ProcessesRunning))
+	gaugeFromMap(cm, "ergo_processes_zombie").Set(float64(nodeInfo.ProcessesZombee))
+	gaugeFromMap(cm, "ergo_processes_spawned_total").Set(float64(nodeInfo.ProcessesSpawned))
+	gaugeFromMap(cm, "ergo_processes_spawn_failed_total").Set(float64(nodeInfo.ProcessesSpawnFailed))
+	gaugeFromMap(cm, "ergo_processes_terminated_total").Set(float64(nodeInfo.ProcessesTerminated))
+	gaugeFromMap(cm, "ergo_memory_used_bytes").Set(float64(nodeInfo.MemoryUsed))
+	gaugeFromMap(cm, "ergo_memory_alloc_bytes").Set(float64(nodeInfo.MemoryAlloc))
+	gaugeFromMap(cm, "ergo_cpu_user_seconds").Set(float64(nodeInfo.UserTime) / 1e9)
+	gaugeFromMap(cm, "ergo_cpu_system_seconds").Set(float64(nodeInfo.SystemTime) / 1e9)
+	gaugeFromMap(cm, "ergo_cpu_cores").Set(float64(runtime.NumCPU()))
+	gaugeFromMap(cm, "ergo_applications_total").Set(float64(nodeInfo.ApplicationsTotal))
+	gaugeFromMap(cm, "ergo_applications_running").Set(float64(nodeInfo.ApplicationsRunning))
+	gaugeFromMap(cm, "ergo_registered_names_total").Set(float64(nodeInfo.RegisteredNames))
+	gaugeFromMap(cm, "ergo_registered_aliases_total").Set(float64(nodeInfo.RegisteredAliases))
+	gaugeFromMap(cm, "ergo_registered_events_total").Set(float64(nodeInfo.RegisteredEvents))
+	gaugeFromMap(cm, "ergo_events_published_total").Set(float64(nodeInfo.EventsPublished))
+	gaugeFromMap(cm, "ergo_events_received_total").Set(float64(nodeInfo.EventsReceived))
+	gaugeFromMap(cm, "ergo_events_local_sent_total").Set(float64(nodeInfo.EventsLocalSent))
+	gaugeFromMap(cm, "ergo_events_remote_sent_total").Set(float64(nodeInfo.EventsRemoteSent))
 
 	// Get network information
 	network := a.Node().Network()
 	connectedNodes := network.Nodes()
 
 	// Update network metrics
-	a.connectedNodes.Set(float64(len(connectedNodes)))
+	gaugeFromMap(cm, "ergo_connected_nodes_total").Set(float64(len(connectedNodes)))
+
+	remoteUptime := gaugeVecFromMap(cm, "ergo_remote_node_uptime_seconds")
+	remoteMsgIn := gaugeVecFromMap(cm, "ergo_remote_messages_in_total")
+	remoteMsgOut := gaugeVecFromMap(cm, "ergo_remote_messages_out_total")
+	remoteBytIn := gaugeVecFromMap(cm, "ergo_remote_bytes_in_total")
+	remoteBytOut := gaugeVecFromMap(cm, "ergo_remote_bytes_out_total")
 
 	// Reset remote node metrics before updating
-	a.remoteNodeUptime.Reset()
-	a.remoteMessagesIn.Reset()
-	a.remoteMessagesOut.Reset()
-	a.remoteBytesIn.Reset()
-	a.remoteBytesOut.Reset()
+	remoteUptime.Reset()
+	remoteMsgIn.Reset()
+	remoteMsgOut.Reset()
+	remoteBytIn.Reset()
+	remoteBytOut.Reset()
 
 	// Update per-node metrics
 	for _, nodeName := range connectedNodes {
@@ -489,11 +348,11 @@ func (a *Actor) collectBaseMetrics() error {
 
 		remoteInfo := remoteNode.Info()
 		nodeNameStr := string(nodeName)
-		a.remoteNodeUptime.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.Uptime))
-		a.remoteMessagesIn.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.MessagesIn))
-		a.remoteMessagesOut.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.MessagesOut))
-		a.remoteBytesIn.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.BytesIn))
-		a.remoteBytesOut.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.BytesOut))
+		remoteUptime.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.Uptime))
+		remoteMsgIn.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.MessagesIn))
+		remoteMsgOut.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.MessagesOut))
+		remoteBytIn.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.BytesIn))
+		remoteBytOut.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.BytesOut))
 	}
 
 	// Collect per-process metrics in a single pass
@@ -554,10 +413,10 @@ func (a *Actor) collectBaseMetrics() error {
 	})
 	a.event.flush()
 
-	a.processMessagesIn.Set(float64(totalMessagesIn))
-	a.processMessagesOut.Set(float64(totalMessagesOut))
-	a.processRunningTime.Set(float64(totalRunningTime) / 1e9)
-	a.processWakeups.Set(float64(totalWakeups))
+	gaugeFromMap(cm, "ergo_process_messages_in").Set(float64(totalMessagesIn))
+	gaugeFromMap(cm, "ergo_process_messages_out").Set(float64(totalMessagesOut))
+	gaugeFromMap(cm, "ergo_process_running_time_seconds").Set(float64(totalRunningTime) / 1e9)
+	gaugeFromMap(cm, "ergo_process_wakeups").Set(float64(totalWakeups))
 
 	return nil
 }
@@ -621,8 +480,8 @@ func (a *Actor) ProcessRun() (rr error) {
 
 		switch message.Type {
 		case gen.MailboxMessageTypeRegular:
-			_, isCollectMetrics := message.Message.(messageCollectMetrics)
-			if isCollectMetrics {
+			switch msg := message.Message.(type) {
+			case messageCollectMetrics:
 				// Collect base metrics (NodeInfo, NetworkInfo)
 				if err := a.collectBaseMetrics(); err != nil {
 					a.Log().Error("failed to collect base metrics: %s", err)
@@ -635,18 +494,39 @@ func (a *Actor) ProcessRun() (rr error) {
 
 				// Schedule next collection
 				a.SendAfter(a.PID(), messageCollectMetrics{}, a.options.CollectInterval)
-				continue
-			}
 
-			if err := a.behavior.HandleMessage(message.From, message.Message); err != nil {
-				return err
+			case MessageUnregister:
+				a.handleUnregister(msg)
+			case MessageGaugeSet:
+				a.handleGaugeSet(msg)
+			case MessageGaugeAdd:
+				a.handleGaugeAdd(msg)
+			case MessageCounterAdd:
+				a.handleCounterAdd(msg)
+			case MessageHistogramObserve:
+				a.handleHistogramObserve(msg)
+			case gen.MessageDownPID:
+				if a.handleProcessDown(msg) == false {
+					if err := a.behavior.HandleMessage(message.From, message.Message); err != nil {
+						return err
+					}
+				}
+			default:
+				if err := a.behavior.HandleMessage(message.From, message.Message); err != nil {
+					return err
+				}
 			}
 
 		case gen.MailboxMessageTypeRequest:
 			var reason error
 			var result any
 
-			result, reason = a.behavior.HandleCall(message.From, message.Ref, message.Message)
+			switch msg := message.Message.(type) {
+			case RegisterRequest:
+				result = a.handleRegister(message.From, msg)
+			default:
+				result, reason = a.behavior.HandleCall(message.From, message.Ref, message.Message)
+			}
 
 			if reason != nil {
 				// if reason is "normal" and we got response - send it before termination
@@ -691,11 +571,263 @@ func (a *Actor) ProcessRun() (rr error) {
 			}
 
 		case gen.MailboxMessageTypeInspect:
-			result := a.behavior.HandleInspect(message.From, message.Message.([]string)...)
+			result := a.inspect(message.From, message.Message.([]string)...)
 			a.SendResponse(message.From, message.Ref, result)
 		}
 
 	}
+}
+
+//
+// custom metric handlers
+//
+
+func (a *Actor) handleRegister(from gen.PID, msg RegisterRequest) RegisterResponse {
+	cm := a.customMetrics()
+
+	// Check for existing metric with the same name
+	if existing, loaded := cm.Load(msg.Name); loaded {
+		m := existing.(*registeredMetric)
+		if m.internal {
+			return RegisterResponse{
+				Error: fmt.Sprintf("metric %q is reserved for internal use", msg.Name),
+			}
+		}
+		// Idempotent: same type + same labels = success
+		if m.metricType == msg.Type && equalStringSlices(m.labelNames, msg.Labels) {
+			return RegisterResponse{}
+		}
+		return RegisterResponse{
+			Error: fmt.Sprintf("metric %q already registered with different type or labels", msg.Name),
+		}
+	}
+
+	nodeName := string(a.Node().Name())
+	constLabels := prometheus.Labels{"node": nodeName}
+
+	rm := &registeredMetric{
+		name:         msg.Name,
+		metricType:   msg.Type,
+		labelNames:   msg.Labels,
+		registeredBy: from,
+	}
+
+	hasLabels := len(msg.Labels) > 0
+
+	switch msg.Type {
+	case MetricGauge:
+		if hasLabels {
+			vec := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+				Name:        msg.Name,
+				Help:        msg.Help,
+				ConstLabels: constLabels,
+			}, msg.Labels)
+			rm.gaugeVec = vec
+			rm.collector = vec
+			break
+		}
+		g := prometheus.NewGauge(prometheus.GaugeOpts{
+			Name:        msg.Name,
+			Help:        msg.Help,
+			ConstLabels: constLabels,
+		})
+		rm.gauge = g
+		rm.collector = g
+
+	case MetricCounter:
+		if hasLabels {
+			vec := prometheus.NewCounterVec(prometheus.CounterOpts{
+				Name:        msg.Name,
+				Help:        msg.Help,
+				ConstLabels: constLabels,
+			}, msg.Labels)
+			rm.counterVec = vec
+			rm.collector = vec
+			break
+		}
+		c := prometheus.NewCounter(prometheus.CounterOpts{
+			Name:        msg.Name,
+			Help:        msg.Help,
+			ConstLabels: constLabels,
+		})
+		rm.counter = c
+		rm.collector = c
+
+	case MetricHistogram:
+		buckets := msg.Buckets
+		if buckets == nil {
+			buckets = prometheus.DefBuckets
+		}
+		if hasLabels {
+			vec := prometheus.NewHistogramVec(prometheus.HistogramOpts{
+				Name:        msg.Name,
+				Help:        msg.Help,
+				ConstLabels: constLabels,
+				Buckets:     buckets,
+			}, msg.Labels)
+			rm.histogramVec = vec
+			rm.collector = vec
+			break
+		}
+		h := prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:        msg.Name,
+			Help:        msg.Help,
+			ConstLabels: constLabels,
+			Buckets:     buckets,
+		})
+		rm.histogram = h
+		rm.collector = h
+
+	default:
+		return RegisterResponse{
+			Error: fmt.Sprintf("unknown metric type: %d", msg.Type),
+		}
+	}
+
+	if err := a.registry.Register(rm.collector); err != nil {
+		return RegisterResponse{Error: err.Error()}
+	}
+
+	cm.Store(msg.Name, rm)
+	a.MonitorPID(from)
+
+	return RegisterResponse{}
+}
+
+func (a *Actor) handleUnregister(msg MessageUnregister) {
+	cm := a.customMetrics()
+	if v, loaded := cm.Load(msg.Name); loaded {
+		m := v.(*registeredMetric)
+		if m.internal {
+			return
+		}
+		cm.Delete(msg.Name)
+		a.registry.Unregister(m.collector)
+	}
+}
+
+func (a *Actor) handleGaugeSet(msg MessageGaugeSet) {
+	cm := a.customMetrics()
+	v, ok := cm.Load(msg.Name)
+	if ok == false {
+		a.Log().Warning("metrics: gauge %q not found", msg.Name)
+		return
+	}
+	m := v.(*registeredMetric)
+	if m.metricType != MetricGauge {
+		a.Log().Warning("metrics: %q is not a gauge", msg.Name)
+		return
+	}
+	if m.gaugeVec != nil {
+		m.gaugeVec.WithLabelValues(msg.Labels...).Set(msg.Value)
+		return
+	}
+	if m.gauge != nil {
+		m.gauge.Set(msg.Value)
+	}
+}
+
+func (a *Actor) handleGaugeAdd(msg MessageGaugeAdd) {
+	cm := a.customMetrics()
+	v, ok := cm.Load(msg.Name)
+	if ok == false {
+		a.Log().Warning("metrics: gauge %q not found", msg.Name)
+		return
+	}
+	m := v.(*registeredMetric)
+	if m.metricType != MetricGauge {
+		a.Log().Warning("metrics: %q is not a gauge", msg.Name)
+		return
+	}
+	if m.gaugeVec != nil {
+		m.gaugeVec.WithLabelValues(msg.Labels...).Add(msg.Value)
+		return
+	}
+	if m.gauge != nil {
+		m.gauge.Add(msg.Value)
+	}
+}
+
+func (a *Actor) handleCounterAdd(msg MessageCounterAdd) {
+	cm := a.customMetrics()
+	v, ok := cm.Load(msg.Name)
+	if ok == false {
+		a.Log().Warning("metrics: counter %q not found", msg.Name)
+		return
+	}
+	m := v.(*registeredMetric)
+	if m.metricType != MetricCounter {
+		a.Log().Warning("metrics: %q is not a counter", msg.Name)
+		return
+	}
+	if m.counterVec != nil {
+		m.counterVec.WithLabelValues(msg.Labels...).Add(msg.Value)
+		return
+	}
+	if m.counter != nil {
+		m.counter.Add(msg.Value)
+	}
+}
+
+func (a *Actor) handleHistogramObserve(msg MessageHistogramObserve) {
+	cm := a.customMetrics()
+	v, ok := cm.Load(msg.Name)
+	if ok == false {
+		a.Log().Warning("metrics: histogram %q not found", msg.Name)
+		return
+	}
+	m := v.(*registeredMetric)
+	if m.metricType != MetricHistogram {
+		a.Log().Warning("metrics: %q is not a histogram", msg.Name)
+		return
+	}
+	if m.histogramVec != nil {
+		m.histogramVec.WithLabelValues(msg.Labels...).Observe(msg.Value)
+		return
+	}
+	if m.histogram != nil {
+		m.histogram.Observe(msg.Value)
+	}
+}
+
+func (a *Actor) handleProcessDown(msg gen.MessageDownPID) bool {
+	found := false
+	cm := a.customMetrics()
+	cm.Range(func(key, value any) bool {
+		m := value.(*registeredMetric)
+		if m.internal {
+			return true
+		}
+		if m.registeredBy == msg.PID {
+			found = true
+			cm.Delete(key)
+			a.registry.Unregister(m.collector)
+		}
+		return true
+	})
+	return found
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *Actor) inspect(from gen.PID, item ...string) map[string]string {
+	// our base inspect data
+	result := a.HandleInspect(from, item...)
+	// user's inspect data on top
+	for k, v := range a.behavior.HandleInspect(from, item...) {
+		result[k] = v
+	}
+	return result
 }
 
 func (a *Actor) ProcessTerminate(reason error) {
@@ -749,8 +881,23 @@ func (a *Actor) HandleInspect(from gen.PID, item ...string) map[string]string {
 
 	// Add general information
 	result["total_metrics"] = fmt.Sprintf("%d", len(metricFamilies))
-	result["http_endpoint"] = fmt.Sprintf("http://%s:%d/metrics", a.options.Host, a.options.Port)
+	if a.options.Mux != nil {
+		result["http_path"] = a.options.Path
+	} else if a.options.Port > 0 {
+		result["http_endpoint"] = fmt.Sprintf("http://%s:%d%s", a.options.Host, a.options.Port, a.options.Path)
+	}
 	result["collect_interval"] = a.options.CollectInterval.String()
+
+	// Count custom metrics (non-internal)
+	customCount := 0
+	a.customMetrics().Range(func(_, v any) bool {
+		m := v.(*registeredMetric)
+		if m.internal == false {
+			customCount++
+		}
+		return true
+	})
+	result["custom_metrics"] = fmt.Sprintf("%d", customCount)
 
 	// Add each metric with its current values
 	for _, mf := range metricFamilies {

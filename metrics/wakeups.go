@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"container/heap"
+	"sync"
 
 	"ergo.services/ergo/gen"
 
@@ -9,37 +10,25 @@ import (
 )
 
 type wakeupsMetrics struct {
-	topWakeups *prometheus.GaugeVec
-	topDrains  *prometheus.GaugeVec
+	cm *sync.Map
 
 	// per-cycle accumulators
 	heapWakeups *wakeupsHeap
 	heapDrains  *drainsHeap
 }
 
-func (wm *wakeupsMetrics) init(registry *prometheus.Registry, nodeLabels prometheus.Labels) {
-	wm.topWakeups = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:        "ergo_process_wakeups_top",
-			Help:        "Top-N processes by cumulative wakeup count (Sleep to Running transitions)",
-			ConstLabels: nodeLabels,
-		},
-		[]string{"pid", "name", "application", "behavior"},
-	)
+func (wm *wakeupsMetrics) init(cm *sync.Map, registry *prometheus.Registry, nodeLabels prometheus.Labels) {
+	wm.cm = cm
 
-	wm.topDrains = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:        "ergo_process_drains_top",
-			Help:        "Top-N processes by drain ratio (MessagesIn / Wakeups)",
-			ConstLabels: nodeLabels,
-		},
-		[]string{"pid", "name", "application", "behavior"},
-	)
+	registerInternalGaugeVec(cm, registry,
+		"ergo_process_wakeups_top",
+		"Top-N processes by cumulative wakeup count (Sleep to Running transitions)",
+		nodeLabels, []string{"pid", "name", "application", "behavior"})
 
-	registry.MustRegister(
-		wm.topWakeups,
-		wm.topDrains,
-	)
+	registerInternalGaugeVec(cm, registry,
+		"ergo_process_drains_top",
+		"Top-N processes by drain ratio (MessagesIn / Wakeups)",
+		nodeLabels, []string{"pid", "name", "application", "behavior"})
 }
 
 func (wm *wakeupsMetrics) begin() {
@@ -93,9 +82,10 @@ func (wm *wakeupsMetrics) observe(info gen.ProcessShortInfo, topN int) {
 }
 
 func (wm *wakeupsMetrics) flush() {
-	wm.topWakeups.Reset()
+	topWakeups := gaugeVecFromMap(wm.cm, "ergo_process_wakeups_top")
+	topWakeups.Reset()
 	for _, e := range *wm.heapWakeups {
-		wm.topWakeups.WithLabelValues(
+		topWakeups.WithLabelValues(
 			e.pid,
 			e.name,
 			e.application,
@@ -103,9 +93,10 @@ func (wm *wakeupsMetrics) flush() {
 		).Set(float64(e.value))
 	}
 
-	wm.topDrains.Reset()
+	topDrains := gaugeVecFromMap(wm.cm, "ergo_process_drains_top")
+	topDrains.Reset()
 	for _, e := range *wm.heapDrains {
-		wm.topDrains.WithLabelValues(
+		topDrains.WithLabelValues(
 			e.pid,
 			e.name,
 			e.application,

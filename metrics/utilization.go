@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"container/heap"
+	"sync"
 
 	"ergo.services/ergo/gen"
 
@@ -17,9 +18,7 @@ var utilizationRangeLabels = []string{
 }
 
 type utilizationMetrics struct {
-	distribution *prometheus.GaugeVec
-	maxUtil      prometheus.Gauge
-	topUtil      *prometheus.GaugeVec
+	cm *sync.Map
 
 	// per-cycle accumulators
 	max     float64
@@ -27,36 +26,23 @@ type utilizationMetrics struct {
 	heap    *utilHeap
 }
 
-func (um *utilizationMetrics) init(registry *prometheus.Registry, nodeLabels prometheus.Labels) {
-	um.distribution = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:        "ergo_process_utilization_distribution",
-			Help:        "Number of processes by utilization range (snapshot per collect cycle)",
-			ConstLabels: nodeLabels,
-		},
-		[]string{"range"},
-	)
+func (um *utilizationMetrics) init(cm *sync.Map, registry *prometheus.Registry, nodeLabels prometheus.Labels) {
+	um.cm = cm
 
-	um.maxUtil = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_process_utilization_max",
-		Help:        "Maximum process utilization (RunningTime/Uptime) on this node",
-		ConstLabels: nodeLabels,
-	})
+	registerInternalGaugeVec(cm, registry,
+		"ergo_process_utilization_distribution",
+		"Number of processes by utilization range (snapshot per collect cycle)",
+		nodeLabels, []string{"range"})
 
-	um.topUtil = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:        "ergo_process_utilization_top",
-			Help:        "Top-N processes by utilization (RunningTime/Uptime)",
-			ConstLabels: nodeLabels,
-		},
-		[]string{"pid", "name", "application", "behavior"},
-	)
+	registerInternalGauge(cm, registry,
+		"ergo_process_utilization_max",
+		"Maximum process utilization (RunningTime/Uptime) on this node",
+		nodeLabels)
 
-	registry.MustRegister(
-		um.distribution,
-		um.maxUtil,
-		um.topUtil,
-	)
+	registerInternalGaugeVec(cm, registry,
+		"ergo_process_utilization_top",
+		"Top-N processes by utilization (RunningTime/Uptime)",
+		nodeLabels, []string{"pid", "name", "application", "behavior"})
 }
 
 func (um *utilizationMetrics) begin() {
@@ -112,15 +98,17 @@ func (um *utilizationMetrics) observe(info gen.ProcessShortInfo, topN int) {
 }
 
 func (um *utilizationMetrics) flush() {
-	um.maxUtil.Set(um.max)
+	gaugeFromMap(um.cm, "ergo_process_utilization_max").Set(um.max)
 
+	distribution := gaugeVecFromMap(um.cm, "ergo_process_utilization_distribution")
 	for i, label := range utilizationRangeLabels {
-		um.distribution.WithLabelValues(label).Set(um.buckets[i])
+		distribution.WithLabelValues(label).Set(um.buckets[i])
 	}
 
-	um.topUtil.Reset()
+	topUtil := gaugeVecFromMap(um.cm, "ergo_process_utilization_top")
+	topUtil.Reset()
 	for _, e := range *um.heap {
-		um.topUtil.WithLabelValues(
+		topUtil.WithLabelValues(
 			e.pid,
 			e.name,
 			e.application,

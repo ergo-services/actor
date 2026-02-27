@@ -19,6 +19,20 @@ Distributed leader election actor implementing Raft-inspired consensus algorithm
 
 See [documentation](https://docs.ergo.services/extra-library/actors/leader) for details.
 
+## health
+
+Kubernetes health probe actor that serves `/health/live`, `/health/ready`, and `/health/startup` endpoints. Actors register named signals with probe type and optional heartbeat timeout. When a signal goes down (missed heartbeat, process termination, or explicit notification), the corresponding probe endpoint returns 503.
+
+**Features:**
+- Kubernetes liveness, readiness, and startup probe endpoints
+- Signal registration with bitmask probe selection and heartbeat timeout
+- Automatic failure detection on heartbeat timeout or process termination
+- Thread-safe HTTP responses via atomic operations
+- External mux support for sharing a port with other HTTP handlers
+- Package-level helper functions for convenient signal management
+
+See [documentation](https://docs.ergo.services/extra-library/actors/health) for details.
+
 ## metrics
 
 Prometheus metrics exporter actor that automatically collects and exposes Ergo node and network telemetry via HTTP endpoint. Provides observability for monitoring cluster health, resource usage, and inter-node communication patterns.
@@ -29,6 +43,7 @@ Prometheus metrics exporter actor that automatically collects and exposes Ergo n
 - HTTP endpoint exposing metrics in Prometheus format
 - Extensible - embed `metrics.Actor` to add custom application metrics
 - Configurable collection interval
+- External mux support for sharing a port with other HTTP handlers
 - Observer UI integration for real-time inspection
 
 See [documentation](https://docs.ergo.services/extra-library/actors/metrics) for details.

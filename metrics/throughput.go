@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"container/heap"
+	"sync"
 
 	"ergo.services/ergo/gen"
 
@@ -9,37 +10,25 @@ import (
 )
 
 type throughputMetrics struct {
-	topIn  *prometheus.GaugeVec
-	topOut *prometheus.GaugeVec
+	cm *sync.Map
 
 	// per-cycle accumulators
 	heapIn  *throughputHeap
 	heapOut *throughputHeap
 }
 
-func (tm *throughputMetrics) init(registry *prometheus.Registry, nodeLabels prometheus.Labels) {
-	tm.topIn = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:        "ergo_process_messages_in_top",
-			Help:        "Top-N processes by total messages received",
-			ConstLabels: nodeLabels,
-		},
-		[]string{"pid", "name", "application", "behavior"},
-	)
+func (tm *throughputMetrics) init(cm *sync.Map, registry *prometheus.Registry, nodeLabels prometheus.Labels) {
+	tm.cm = cm
 
-	tm.topOut = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:        "ergo_process_messages_out_top",
-			Help:        "Top-N processes by total messages sent",
-			ConstLabels: nodeLabels,
-		},
-		[]string{"pid", "name", "application", "behavior"},
-	)
+	registerInternalGaugeVec(cm, registry,
+		"ergo_process_messages_in_top",
+		"Top-N processes by total messages received",
+		nodeLabels, []string{"pid", "name", "application", "behavior"})
 
-	registry.MustRegister(
-		tm.topIn,
-		tm.topOut,
-	)
+	registerInternalGaugeVec(cm, registry,
+		"ergo_process_messages_out_top",
+		"Top-N processes by total messages sent",
+		nodeLabels, []string{"pid", "name", "application", "behavior"})
 }
 
 func (tm *throughputMetrics) begin() {
@@ -87,9 +76,10 @@ func (tm *throughputMetrics) observe(info gen.ProcessShortInfo, topN int) {
 }
 
 func (tm *throughputMetrics) flush() {
-	tm.topIn.Reset()
+	topIn := gaugeVecFromMap(tm.cm, "ergo_process_messages_in_top")
+	topIn.Reset()
 	for _, e := range *tm.heapIn {
-		tm.topIn.WithLabelValues(
+		topIn.WithLabelValues(
 			e.pid,
 			e.name,
 			e.application,
@@ -97,9 +87,10 @@ func (tm *throughputMetrics) flush() {
 		).Set(float64(e.value))
 	}
 
-	tm.topOut.Reset()
+	topOut := gaugeVecFromMap(tm.cm, "ergo_process_messages_out_top")
+	topOut.Reset()
 	for _, e := range *tm.heapOut {
-		tm.topOut.WithLabelValues(
+		topOut.WithLabelValues(
 			e.pid,
 			e.name,
 			e.application,

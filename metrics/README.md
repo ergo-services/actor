@@ -2,6 +2,8 @@
 
 A Prometheus metrics exporter actor for Ergo Framework that automatically collects and exposes node and network metrics via HTTP endpoint.
 
+Doc: https://docs.ergo.services/extra-library/actors/metrics
+
 ## Features
 
 - **Automatic Base Metrics Collection**: Collects node metrics (uptime, processes, memory, CPU), network metrics (connected nodes, messages, bytes transferred), and event metrics (pub/sub subscribers, publish rates, delivery fanout)
@@ -46,6 +48,7 @@ func main() {
 options := metrics.Options{
     Host:            "0.0.0.0",           // Listen address
     Port:            9090,                 // HTTP port
+    Path:            "/metrics",          // HTTP path (default: "/metrics")
     CollectInterval: 5 * time.Second,     // Collection frequency
     TopN:            50,                   // Top-N entries for each metric group (processes and events)
 }
@@ -53,28 +56,65 @@ options := metrics.Options{
 n.Spawn(metrics.Factory, gen.ProcessOptions{}, options)
 ```
 
+### External Mux
+
+When you need to serve metrics alongside other HTTP handlers on the same port, provide an external `*http.ServeMux`. The metrics actor registers its `/metrics` handler on the given mux and skips starting its own HTTP server:
+
+```go
+mux := http.NewServeMux()
+mux.HandleFunc("/custom", myHandler)
+
+options := metrics.Options{
+    Mux:             mux,
+    CollectInterval: 5 * time.Second,
+}
+
+n.Spawn(metrics.Factory, gen.ProcessOptions{}, options)
+```
+
+When `Mux` is set, the `Port` and `Host` fields are ignored since the caller is responsible for serving the mux.
+
 ### Default Values
 
 - **Port**: 3000
 - **Host**: localhost
+- **Path**: /metrics
 - **CollectInterval**: 10 seconds
 - **TopN**: 50
 
-## Extending with Custom Metrics
+## Custom Metrics
 
-Create a custom metrics actor with `metrics.Actor`:
+There are two ways to work with custom metrics: helper functions from any actor, or embedding `metrics.Actor` for direct registry access.
+
+### Helper Functions
+
+Any actor on the same node can register and update custom metrics using the helper functions. Registration is a synchronous `Call` (returns error on failure). Updates are asynchronous `Send` (fire-and-forget).
 
 ```go
-package main
+// Register metrics (sync Call)
+metrics.RegisterGauge(w, "metrics_actor_name", "request_count", "Total requests", []string{"method"})
+metrics.RegisterCounter(w, "metrics_actor_name", "cache_hits", "Cache hit count", []string{"region"})
+metrics.RegisterHistogram(w, "metrics_actor_name", "latency_seconds", "Request latency", []string{"path"}, nil)
 
-import (
-    "time"
-    "ergo.services/actor/metrics"
-    "ergo.services/ergo/gen"
-    "github.com/prometheus/client_golang/prometheus"
-)
+// Update metrics (async Send)
+metrics.GaugeSet(w, "metrics_actor_name", "request_count", 42, []string{"GET"})
+metrics.GaugeAdd(w, "metrics_actor_name", "request_count", 1, []string{"POST"})
+metrics.CounterAdd(w, "metrics_actor_name", "cache_hits", 1, []string{"us-east"})
+metrics.HistogramObserve(w, "metrics_actor_name", "latency_seconds", 0.023, []string{"/api/users"})
 
-// Custom metrics actor
+// Unregister (async Send)
+metrics.Unregister(w, "metrics_actor_name", "request_count")
+```
+
+The `to` parameter accepts anything `gen.Process.Send` accepts: `gen.Atom` name, `gen.PID`, `gen.ProcessID`, or `gen.Alias`.
+
+When a process that registered a metric terminates, the metrics actor automatically unregisters all metrics owned by that process. If the `gen.MessageDownPID` does not match any registered metric owner, it is forwarded to `HandleMessage` so that actors embedding `metrics.Actor` can use their own monitors.
+
+### Embedding metrics.Actor
+
+For direct access to the Prometheus registry (e.g. periodic collection via `CollectMetrics`), embed `metrics.Actor`:
+
+```go
 type MyMetrics struct {
     metrics.Actor
 
@@ -82,43 +122,61 @@ type MyMetrics struct {
     activeUsers   prometheus.Gauge
 }
 
-// Factory function
 func CustomFactory() gen.ProcessBehavior {
     return &MyMetrics{}
 }
 
-// Initialize custom metrics
 func (m *MyMetrics) Init(args ...any) (metrics.Options, error) {
-    // Create custom metrics
     m.requestsTotal = prometheus.NewCounter(prometheus.CounterOpts{
         Name: "my_app_requests_total",
         Help: "Total number of requests",
     })
-
     m.activeUsers = prometheus.NewGauge(prometheus.GaugeOpts{
         Name: "my_app_active_users",
         Help: "Number of active users",
     })
 
-    // Register with the metrics registry
     m.Registry().MustRegister(m.requestsTotal, m.activeUsers)
 
-    // Return options
     return metrics.Options{
         Port:            9090,
         CollectInterval: 5 * time.Second,
     }, nil
 }
 
-// Collect custom metrics periodically
 func (m *MyMetrics) CollectMetrics() error {
-    // Update your custom metrics here
     m.requestsTotal.Add(10)
     m.activeUsers.Set(42)
-
     return nil
 }
 ```
+
+### Shared Mode
+
+A single metrics actor processes messages sequentially -- one at a time. When many actors on the node send metric updates concurrently, the metrics actor's mailbox becomes the bottleneck. Registration (`RegisterRequest`) is a synchronous `Call`, so callers block until the metrics actor processes their request. High-throughput updates (`GaugeSet`, `CounterAdd`, etc.) queue up in the mailbox, increasing latency for all senders.
+
+`metrics.Shared` solves this by allowing a pool of metrics actor instances to share the same Prometheus registry and custom metric storage. The pool distributes incoming messages across workers, providing parallel processing while all workers read and write to the same underlying registry.
+
+```go
+shared := metrics.NewShared()
+
+// Primary actor: collects base Ergo metrics, registers /metrics handler on the mux.
+// Identified by having both Shared and Mux (or Port) set.
+primaryOpts := metrics.Options{
+    Mux:             mux,
+    Shared:          shared,
+    Path:            "/metrics",
+    CollectInterval: 10 * time.Second,
+}
+
+// Worker actor: handles custom metric registration and updates only.
+// No HTTP server, no base metrics collection.
+workerOpts := metrics.Options{
+    Shared: shared,
+}
+```
+
+The primary actor initializes base Ergo metrics, starts the HTTP handler, and runs the collection timer. Workers only process custom metric messages (`RegisterRequest`, `MessageGaugeSet`, etc.), distributing the load across the pool.
 
 ## Available Base Metrics
 
@@ -303,16 +361,9 @@ On the dashboard, the Throughput panels show wakeup rate as a third line alongsi
 
 ## Observer Integration
 
-The metrics actor implements `HandleInspect` to provide metric information in the Observer UI:
+The metrics actor provides inspection data in the Observer UI: total metric count, HTTP endpoint, collection interval, custom metric count, and current values for all registered metrics.
 
-```go
-// Access via Observer at http://localhost:9911
-// Shows:
-// - total_metrics: count of registered metrics
-// - http_endpoint: metrics HTTP endpoint URL
-// - collect_interval: collection interval
-// - Each metric name with current values
-```
+When embedding `metrics.Actor` and overriding `HandleInspect`, the base inspection data is always included. The actor merges both results: base data first, then user data on top. User keys override base keys with the same name, but base keys that the user does not set are preserved.
 
 ## Integration with Prometheus
 

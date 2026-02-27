@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"container/heap"
+	"sync"
 
 	"ergo.services/ergo/gen"
 
@@ -9,34 +10,25 @@ import (
 )
 
 type initTimeMetrics struct {
-	maxInitTime prometheus.Gauge
-	topInitTime *prometheus.GaugeVec
+	cm *sync.Map
 
 	// per-cycle accumulators
 	max  uint64
 	heap *initTimeHeap
 }
 
-func (im *initTimeMetrics) init(registry *prometheus.Registry, nodeLabels prometheus.Labels) {
-	im.maxInitTime = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_process_init_time_max_seconds",
-		Help:        "Maximum ProcessInit duration across all processes on this node",
-		ConstLabels: nodeLabels,
-	})
+func (im *initTimeMetrics) init(cm *sync.Map, registry *prometheus.Registry, nodeLabels prometheus.Labels) {
+	im.cm = cm
 
-	im.topInitTime = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:        "ergo_process_init_time_top_seconds",
-			Help:        "Top-N processes by ProcessInit duration",
-			ConstLabels: nodeLabels,
-		},
-		[]string{"pid", "name", "application", "behavior"},
-	)
+	registerInternalGauge(cm, registry,
+		"ergo_process_init_time_max_seconds",
+		"Maximum ProcessInit duration across all processes on this node",
+		nodeLabels)
 
-	registry.MustRegister(
-		im.maxInitTime,
-		im.topInitTime,
-	)
+	registerInternalGaugeVec(cm, registry,
+		"ergo_process_init_time_top_seconds",
+		"Top-N processes by ProcessInit duration",
+		nodeLabels, []string{"pid", "name", "application", "behavior"})
 }
 
 func (im *initTimeMetrics) begin() {
@@ -70,11 +62,12 @@ func (im *initTimeMetrics) observe(info gen.ProcessShortInfo, topN int) {
 }
 
 func (im *initTimeMetrics) flush() {
-	im.maxInitTime.Set(float64(im.max) / 1e9)
+	gaugeFromMap(im.cm, "ergo_process_init_time_max_seconds").Set(float64(im.max) / 1e9)
 
-	im.topInitTime.Reset()
+	topInitTime := gaugeVecFromMap(im.cm, "ergo_process_init_time_top_seconds")
+	topInitTime.Reset()
 	for _, e := range *im.heap {
-		im.topInitTime.WithLabelValues(
+		topInitTime.WithLabelValues(
 			e.pid,
 			e.name,
 			e.application,

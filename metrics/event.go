@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"container/heap"
+	"sync"
 
 	"ergo.services/ergo/gen"
 
@@ -9,12 +10,7 @@ import (
 )
 
 type eventMetrics struct {
-	maxSubs        prometheus.Gauge
-	utilization    *prometheus.GaugeVec
-	topSubs        *prometheus.GaugeVec
-	topPublished   *prometheus.GaugeVec
-	topLocalSent   *prometheus.GaugeVec
-	topRemoteSent  *prometheus.GaugeVec
+	cm *sync.Map
 
 	// per-cycle accumulators
 	max            int64
@@ -25,66 +21,38 @@ type eventMetrics struct {
 	heapRemoteSent *eventHeap
 }
 
-func (em *eventMetrics) init(registry *prometheus.Registry, nodeLabels prometheus.Labels) {
-	em.maxSubs = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name:        "ergo_event_subscribers_max",
-		Help:        "Maximum subscriber count across all events on this node",
-		ConstLabels: nodeLabels,
-	})
+func (em *eventMetrics) init(cm *sync.Map, registry *prometheus.Registry, nodeLabels prometheus.Labels) {
+	em.cm = cm
 
-	em.utilization = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:        "ergo_event_utilization",
-			Help:        "Number of events in each utilization state (snapshot per collect cycle)",
-			ConstLabels: nodeLabels,
-		},
-		[]string{"state"},
-	)
+	registerInternalGauge(cm, registry,
+		"ergo_event_subscribers_max",
+		"Maximum subscriber count across all events on this node",
+		nodeLabels)
 
-	em.topSubs = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:        "ergo_event_subscribers_top",
-			Help:        "Top-N events by subscriber count",
-			ConstLabels: nodeLabels,
-		},
-		[]string{"event", "producer"},
-	)
+	registerInternalGaugeVec(cm, registry,
+		"ergo_event_utilization",
+		"Number of events in each utilization state (snapshot per collect cycle)",
+		nodeLabels, []string{"state"})
 
-	em.topPublished = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:        "ergo_event_published_top",
-			Help:        "Top-N events by messages published",
-			ConstLabels: nodeLabels,
-		},
-		[]string{"event", "producer"},
-	)
+	registerInternalGaugeVec(cm, registry,
+		"ergo_event_subscribers_top",
+		"Top-N events by subscriber count",
+		nodeLabels, []string{"event", "producer"})
 
-	em.topLocalSent = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:        "ergo_event_local_sent_top",
-			Help:        "Top-N events by messages delivered to local subscribers",
-			ConstLabels: nodeLabels,
-		},
-		[]string{"event", "producer"},
-	)
+	registerInternalGaugeVec(cm, registry,
+		"ergo_event_published_top",
+		"Top-N events by messages published",
+		nodeLabels, []string{"event", "producer"})
 
-	em.topRemoteSent = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name:        "ergo_event_remote_sent_top",
-			Help:        "Top-N events by messages sent to remote nodes",
-			ConstLabels: nodeLabels,
-		},
-		[]string{"event", "producer"},
-	)
+	registerInternalGaugeVec(cm, registry,
+		"ergo_event_local_sent_top",
+		"Top-N events by messages delivered to local subscribers",
+		nodeLabels, []string{"event", "producer"})
 
-	registry.MustRegister(
-		em.maxSubs,
-		em.utilization,
-		em.topSubs,
-		em.topPublished,
-		em.topLocalSent,
-		em.topRemoteSent,
-	)
+	registerInternalGaugeVec(cm, registry,
+		"ergo_event_remote_sent_top",
+		"Top-N events by messages sent to remote nodes",
+		nodeLabels, []string{"event", "producer"})
 }
 
 func (em *eventMetrics) begin() {
@@ -155,18 +123,19 @@ func (em *eventMetrics) observe(info gen.EventInfo, topN int) {
 }
 
 func (em *eventMetrics) flush() {
-	em.maxSubs.Set(float64(em.max))
+	gaugeFromMap(em.cm, "ergo_event_subscribers_max").Set(float64(em.max))
 
-	em.utilization.WithLabelValues("active").Set(em.utilCounts[0])
-	em.utilization.WithLabelValues("on_demand").Set(em.utilCounts[1])
-	em.utilization.WithLabelValues("idle").Set(em.utilCounts[2])
-	em.utilization.WithLabelValues("no_subscribers").Set(em.utilCounts[3])
-	em.utilization.WithLabelValues("no_publishing").Set(em.utilCounts[4])
+	utilization := gaugeVecFromMap(em.cm, "ergo_event_utilization")
+	utilization.WithLabelValues("active").Set(em.utilCounts[0])
+	utilization.WithLabelValues("on_demand").Set(em.utilCounts[1])
+	utilization.WithLabelValues("idle").Set(em.utilCounts[2])
+	utilization.WithLabelValues("no_subscribers").Set(em.utilCounts[3])
+	utilization.WithLabelValues("no_publishing").Set(em.utilCounts[4])
 
-	eventGaugeFlush(em.topSubs, em.heapSubs)
-	eventGaugeFlush(em.topPublished, em.heapPublished)
-	eventGaugeFlush(em.topLocalSent, em.heapLocalSent)
-	eventGaugeFlush(em.topRemoteSent, em.heapRemoteSent)
+	eventGaugeFlush(gaugeVecFromMap(em.cm, "ergo_event_subscribers_top"), em.heapSubs)
+	eventGaugeFlush(gaugeVecFromMap(em.cm, "ergo_event_published_top"), em.heapPublished)
+	eventGaugeFlush(gaugeVecFromMap(em.cm, "ergo_event_local_sent_top"), em.heapLocalSent)
+	eventGaugeFlush(gaugeVecFromMap(em.cm, "ergo_event_remote_sent_top"), em.heapRemoteSent)
 }
 
 //
