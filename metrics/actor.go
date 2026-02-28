@@ -225,6 +225,9 @@ func (a *Actor) initializeErgoMetrics() error {
 	registerInternalGauge(cm, a.registry, "ergo_events_local_sent_total", "Cumulative number of event messages sent to local subscribers", nodeLabels)
 	registerInternalGauge(cm, a.registry, "ergo_events_remote_sent_total", "Cumulative number of event messages sent to remote subscribers", nodeLabels)
 
+	// Log metrics
+	registerInternalGaugeVec(cm, a.registry, "ergo_log_messages_total", "Cumulative number of log messages by level", nodeLabels, []string{"level"})
+
 	// Network metrics
 	registerInternalGauge(cm, a.registry, "ergo_connected_nodes_total", "Total number of connected nodes", nodeLabels)
 	registerInternalGaugeVec(cm, a.registry, "ergo_remote_node_uptime_seconds", "Remote node uptime in seconds", nodeLabels, []string{"remote_node"})
@@ -317,6 +320,13 @@ func (a *Actor) collectBaseMetrics() error {
 	gaugeFromMap(cm, "ergo_events_received_total").Set(float64(nodeInfo.EventsReceived))
 	gaugeFromMap(cm, "ergo_events_local_sent_total").Set(float64(nodeInfo.EventsLocalSent))
 	gaugeFromMap(cm, "ergo_events_remote_sent_total").Set(float64(nodeInfo.EventsRemoteSent))
+
+	// Update log metrics
+	logVec := gaugeVecFromMap(cm, "ergo_log_messages_total")
+	logLevels := []string{"trace", "debug", "info", "warning", "error", "panic"}
+	for i, name := range logLevels {
+		logVec.WithLabelValues(name).Set(float64(nodeInfo.LogMessages[i]))
+	}
 
 	// Get network information
 	network := a.Node().Network()

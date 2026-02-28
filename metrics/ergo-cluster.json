@@ -268,7 +268,7 @@
         },
         {
           "expr": "sum(ergo_mailbox_latency_distribution{node=~\"$node\", range!=\"1ms\"})",
-          "legendFormat": "≥ 1ms"
+          "legendFormat": "\u2265 1ms"
         }
       ],
       "fieldConfig": {
@@ -301,7 +301,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "≥ 1ms"
+              "options": "\u2265 1ms"
             },
             "properties": [
               {
@@ -2934,6 +2934,158 @@
       ]
     },
     {
+      "id": 112,
+      "type": "row",
+      "title": "Logging",
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 45
+      },
+      "panels": [
+        {
+          "id": 113,
+          "title": "Log Messages Rate",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 46
+          },
+          "targets": [
+            {
+              "expr": "sum by (level) (rate(ergo_log_messages_total{node=~\"$node\"}[1m]))",
+              "legendFormat": "{{level}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "cps",
+              "min": 0,
+              "custom": {
+                "lineInterpolation": "smooth",
+                "fillOpacity": 30,
+                "gradientMode": "opacity",
+                "stacking": {
+                  "mode": "normal"
+                }
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "trace"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "light-gray"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "debug"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "gray"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "info"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "green"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "warning"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "yellow"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "error"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "red"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "panic"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "dark-red"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right",
+              "calcs": [
+                "lastNotNull",
+                "mean",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi"
+            }
+          },
+          "description": "Rate of log messages per second by level across selected nodes. Stacked area shows the composition of log traffic. Spikes in warning/error/panic indicate issues that need investigation. A healthy system shows mostly info (green) with minimal warning/error."
+        }
+      ]
+    },
+    {
       "id": 91,
       "type": "row",
       "title": "Network",
@@ -2958,11 +3110,11 @@
           "targets": [
             {
               "expr": "sum(rate(ergo_remote_messages_in_total[1m]))",
-              "legendFormat": "← In"
+              "legendFormat": "\u2190 In"
             },
             {
               "expr": "sum(rate(ergo_remote_messages_out_total[1m]))",
-              "legendFormat": "→ Out"
+              "legendFormat": "\u2192 Out"
             }
           ],
           "fieldConfig": {
@@ -2996,11 +3148,11 @@
           "targets": [
             {
               "expr": "sum(rate(ergo_remote_bytes_in_total[1m]))",
-              "legendFormat": "← In"
+              "legendFormat": "\u2190 In"
             },
             {
               "expr": "sum(rate(ergo_remote_bytes_out_total[1m]))",
-              "legendFormat": "→ Out"
+              "legendFormat": "\u2192 Out"
             }
           ],
           "fieldConfig": {
@@ -3034,11 +3186,11 @@
           "targets": [
             {
               "expr": "sum by (node) (rate(ergo_remote_messages_in_total{node=~\"$node\"}[1m]))",
-              "legendFormat": "{{node}} ← in"
+              "legendFormat": "{{node}} \u2190 in"
             },
             {
               "expr": "sum by (node) (rate(ergo_remote_messages_out_total{node=~\"$node\"}[1m]))",
-              "legendFormat": "{{node}} → out"
+              "legendFormat": "{{node}} \u2192 out"
             }
           ],
           "fieldConfig": {
@@ -3071,11 +3223,11 @@
           "targets": [
             {
               "expr": "sum by (node) (rate(ergo_remote_bytes_in_total{node=~\"$node\"}[1m]))",
-              "legendFormat": "{{node}} ← in"
+              "legendFormat": "{{node}} \u2190 in"
             },
             {
               "expr": "sum by (node) (rate(ergo_remote_bytes_out_total{node=~\"$node\"}[1m]))",
-              "legendFormat": "{{node}} → out"
+              "legendFormat": "{{node}} \u2192 out"
             }
           ],
           "fieldConfig": {
@@ -3108,11 +3260,11 @@
           "targets": [
             {
               "expr": "rate(ergo_remote_messages_in_total{node=~\"$node\"}[1m])",
-              "legendFormat": "{{node}} ← {{remote_node}}"
+              "legendFormat": "{{node}} \u2190 {{remote_node}}"
             },
             {
               "expr": "rate(ergo_remote_messages_out_total{node=~\"$node\"}[1m])",
-              "legendFormat": "{{node}} → {{remote_node}}"
+              "legendFormat": "{{node}} \u2192 {{remote_node}}"
             }
           ],
           "fieldConfig": {
@@ -3145,11 +3297,11 @@
           "targets": [
             {
               "expr": "rate(ergo_remote_bytes_in_total{node=~\"$node\"}[1m])",
-              "legendFormat": "{{node}} ← {{remote_node}}"
+              "legendFormat": "{{node}} \u2190 {{remote_node}}"
             },
             {
               "expr": "rate(ergo_remote_bytes_out_total{node=~\"$node\"}[1m])",
-              "legendFormat": "{{node}} → {{remote_node}}"
+              "legendFormat": "{{node}} \u2192 {{remote_node}}"
             }
           ],
           "fieldConfig": {

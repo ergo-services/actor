@@ -205,6 +205,12 @@ The primary actor initializes base Ergo metrics, starts the HTTP handler, and ru
 | `ergo_events_local_sent_total` | Gauge | Cumulative number of event messages delivered to local subscribers. Reflects actual fanout -- one publish with 100 subscribers produces 100 local deliveries |
 | `ergo_events_remote_sent_total` | Gauge | Cumulative number of event messages sent to remote nodes. Counts one per node, not per subscriber, due to shared subscription optimization |
 
+### Log Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `ergo_log_messages_total` | Gauge | level | Cumulative log message count by level (trace, debug, info, warning, error, panic). Counted once before fan-out to loggers |
+
 ### Network Metrics
 
 | Metric | Type | Labels | Description |
@@ -546,6 +552,12 @@ A collapsed row containing four timeseries graphs. Click to expand.
 - **CPU System Time per Node** -- system CPU time percentage per node, normalized by core count. High system CPU relative to user CPU suggests excessive syscalls, context switching, or I/O pressure rather than application workload
 - **Memory (OS:used)** -- OS-reported memory used per node. Monotonic growth over time is a strong indicator of a memory leak. Compare across nodes to spot outliers
 - **Memory (Runtime:alloc)** -- Go runtime allocated memory per node. Sawtooth pattern is normal (allocation followed by GC). Flat or steadily rising baseline between GC cycles points to objects that are not being collected
+
+#### Logging (collapsed row)
+
+A collapsed row containing one timeseries graph. Click to expand.
+
+- **Log Messages Rate** -- rate of log messages per second by level as a stacked area chart. Colors follow severity: trace and debug are gray, info is green, warning is yellow, error is red, panic is dark red. A healthy system is mostly green. Spikes in warning or error indicate issues worth investigating. Counting happens once before fan-out to loggers, so the numbers are accurate regardless of how many loggers are registered
 
 #### Network (collapsed row)
 
