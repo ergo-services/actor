@@ -191,7 +191,7 @@ func (a *Actor) ProcessRun() (rr error) {
 			var reason error
 			var result any
 
-			result, reason = a.behavior.HandleCall(message.From, message.Ref, message.Message)
+			result, reason = a.handleCall(message.From, message.Ref, message.Message)
 
 			if reason != nil {
 				if reason == gen.TerminateReasonNormal && result != nil {
@@ -250,14 +250,19 @@ func (a *Actor) ProcessTerminate(reason error) {
 // message dispatch
 //
 
+func (a *Actor) handleCall(from gen.PID, ref gen.Ref, message any) (any, error) {
+	switch msg := message.(type) {
+	case RegisterRequest:
+		return a.handleRegister(from, msg)
+	case UnregisterRequest:
+		return a.handleUnregister(from, msg)
+	default:
+		return a.behavior.HandleCall(from, ref, message)
+	}
+}
+
 func (a *Actor) handleMessage(from gen.PID, message any) error {
 	switch msg := message.(type) {
-	case MessageRegister:
-		return a.handleRegister(from, msg)
-
-	case MessageUnregister:
-		return a.handleUnregister(from, msg)
-
 	case MessageHeartbeat:
 		return a.handleHeartbeat(from, msg)
 
@@ -291,7 +296,11 @@ func (a *Actor) handleMessage(from gen.PID, message any) error {
 // signal management
 //
 
-func (a *Actor) handleRegister(from gen.PID, msg MessageRegister) error {
+func (a *Actor) handleRegister(from gen.PID, msg RegisterRequest) (RegisterResponse, error) {
+	if msg.Signal == "" {
+		return RegisterResponse{Error: "empty signal name"}, nil
+	}
+
 	probe := msg.Probe
 	if probe == 0 {
 		probe = ProbeLiveness
@@ -312,13 +321,13 @@ func (a *Actor) handleRegister(from gen.PID, msg MessageRegister) error {
 	a.Log().Debug("signal registered: %s (probe=%d, timeout=%s) by %s",
 		msg.Signal, probe, msg.Timeout, from)
 
-	return nil
+	return RegisterResponse{}, nil
 }
 
-func (a *Actor) handleUnregister(from gen.PID, msg MessageUnregister) error {
+func (a *Actor) handleUnregister(from gen.PID, msg UnregisterRequest) (UnregisterResponse, error) {
 	state, exist := a.signals[msg.Signal]
 	if exist == false {
-		return nil
+		return UnregisterResponse{Error: "unknown signal"}, nil
 	}
 
 	a.Demonitor(state.registeredBy)
@@ -327,7 +336,7 @@ func (a *Actor) handleUnregister(from gen.PID, msg MessageUnregister) error {
 
 	a.Log().Debug("signal unregistered: %s by %s", msg.Signal, from)
 
-	return nil
+	return UnregisterResponse{}, nil
 }
 
 func (a *Actor) handleHeartbeat(from gen.PID, msg MessageHeartbeat) error {

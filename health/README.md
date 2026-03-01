@@ -104,11 +104,11 @@ func (w *MyActor) Init(args ...any) error {
 
 Probes can be combined with bitwise OR: `ProbeLiveness | ProbeReadiness` registers a signal for both liveness and readiness endpoints.
 
-When `Probe` is 0 in `MessageRegister`, it defaults to `ProbeLiveness`.
+When `Probe` is 0 in `RegisterRequest`, it defaults to `ProbeLiveness`.
 
 ### Heartbeat Timeout
 
-When `Timeout` is set in `MessageRegister`, the health actor expects periodic `MessageHeartbeat` messages for that signal. If no heartbeat arrives within the timeout, the signal is marked as down.
+When `Timeout` is set in `RegisterRequest`, the health actor expects periodic `MessageHeartbeat` messages for that signal. If no heartbeat arrives within the timeout, the signal is marked as down.
 
 When `Timeout` is 0, no heartbeat is required. The signal stays up until explicitly marked down via `MessageSignalDown` or the registering process terminates.
 
@@ -162,15 +162,15 @@ When no signals are registered for a probe, the response contains no `signals` f
 
 ## Message Types
 
-| Message | Direction | Description |
-|---------|-----------|-------------|
-| `MessageRegister` | actor -> health | Register a signal with probe bitmask and optional timeout |
-| `MessageUnregister` | actor -> health | Remove a signal |
-| `MessageHeartbeat` | actor -> health | Update heartbeat timestamp for a signal |
-| `MessageSignalUp` | actor -> health | Manually mark a signal as up |
-| `MessageSignalDown` | actor -> health | Manually mark a signal as down |
+| Message | Type | Description |
+|---------|------|-------------|
+| `RegisterRequest` / `RegisterResponse` | sync (Call) | Register a signal with probe bitmask and optional timeout |
+| `UnregisterRequest` / `UnregisterResponse` | sync (Call) | Remove a signal |
+| `MessageHeartbeat` | async (Send) | Update heartbeat timestamp for a signal |
+| `MessageSignalUp` | async (Send) | Manually mark a signal as up |
+| `MessageSignalDown` | async (Send) | Manually mark a signal as down |
 
-All message types are registered with EDF for network transparency.
+Registration and unregistration use synchronous Call to confirm the operation completed before the caller proceeds. This prevents race conditions where a heartbeat arrives before the signal is registered. All types are registered with EDF for network transparency.
 
 ## External Mux
 

@@ -16,18 +16,28 @@ const (
 	ProbeStartup                     // 4
 )
 
-// MessageRegister registers a signal with the health actor.
+// RegisterRequest registers a signal with the health actor (sync Call).
 // The registering process will be monitored. If the process terminates,
 // the signal is marked as down automatically.
-type MessageRegister struct {
+type RegisterRequest struct {
 	Signal  gen.Atom
 	Probe   Probe         // bitmask, default ProbeLiveness if 0
 	Timeout time.Duration // heartbeat timeout, 0 = no heartbeat needed
 }
 
-// MessageUnregister removes a signal from the health actor.
-type MessageUnregister struct {
+// RegisterResponse is the response to RegisterRequest.
+type RegisterResponse struct {
+	Error string
+}
+
+// UnregisterRequest removes a signal from the health actor (sync Call).
+type UnregisterRequest struct {
 	Signal gen.Atom
+}
+
+// UnregisterResponse is the response to UnregisterRequest.
+type UnregisterResponse struct {
+	Error string
 }
 
 // MessageHeartbeat updates the heartbeat timestamp for a signal.

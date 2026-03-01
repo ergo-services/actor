@@ -1,25 +1,48 @@
 package health
 
 import (
+	"fmt"
 	"time"
 
 	"ergo.services/ergo/gen"
 )
 
-// Register sends a MessageRegister to the health actor. The calling process
-// will be monitored by the health actor. If it terminates, the signal is
-// automatically marked as down.
+// Register sends a RegisterRequest to the health actor (sync Call).
+// The calling process will be monitored by the health actor. If it terminates,
+// the signal is automatically marked as down.
 func Register(process gen.Process, to any, signal gen.Atom, probe Probe, timeout time.Duration) error {
-	return process.Send(to, MessageRegister{
+	result, err := process.Call(to, RegisterRequest{
 		Signal:  signal,
 		Probe:   probe,
 		Timeout: timeout,
 	})
+	if err != nil {
+		return err
+	}
+	resp, ok := result.(RegisterResponse)
+	if ok == false {
+		return fmt.Errorf("unexpected response type: %T", result)
+	}
+	if resp.Error != "" {
+		return fmt.Errorf("%s", resp.Error)
+	}
+	return nil
 }
 
-// Unregister sends a MessageUnregister to the health actor.
+// Unregister sends an UnregisterRequest to the health actor (sync Call).
 func Unregister(process gen.Process, to any, signal gen.Atom) error {
-	return process.Send(to, MessageUnregister{Signal: signal})
+	result, err := process.Call(to, UnregisterRequest{Signal: signal})
+	if err != nil {
+		return err
+	}
+	resp, ok := result.(UnregisterResponse)
+	if ok == false {
+		return fmt.Errorf("unexpected response type: %T", result)
+	}
+	if resp.Error != "" {
+		return fmt.Errorf("%s", resp.Error)
+	}
+	return nil
 }
 
 // Heartbeat sends a MessageHeartbeat to the health actor.

@@ -11,8 +11,10 @@ func init() {
 	types := []any{
 		Probe(0),
 		time.Duration(0),
-		MessageRegister{},
-		MessageUnregister{},
+		RegisterRequest{},
+		RegisterResponse{},
+		UnregisterRequest{},
+		UnregisterResponse{},
 		MessageHeartbeat{},
 		MessageSignalUp{},
 		MessageSignalDown{},
