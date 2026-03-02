@@ -2951,45 +2951,38 @@
           "type": "timeseries",
           "gridPos": {
             "h": 8,
-            "w": 24,
+            "w": 12,
             "x": 0,
             "y": 46
           },
           "targets": [
             {
-              "expr": "sum by (level) (rate(ergo_log_messages_total{node=~\"$node\"}[1m]))",
-              "legendFormat": "{{level}}"
+              "expr": "sum by (level) (rate(ergo_log_messages_total{node=~\"$node\",level=\"debug\"}[1m]))",
+              "legendFormat": "debug"
+            },
+            {
+              "expr": "sum by (level) (rate(ergo_log_messages_total{node=~\"$node\",level=\"info\"}[1m]))",
+              "legendFormat": "info"
+            },
+            {
+              "expr": "sum by (level) (rate(ergo_log_messages_total{node=~\"$node\",level=\"warning\"}[1m]))",
+              "legendFormat": "warning"
+            },
+            {
+              "expr": "sum by (level) (rate(ergo_log_messages_total{node=~\"$node\",level=\"error\"}[1m]))",
+              "legendFormat": "error"
             }
           ],
           "fieldConfig": {
             "defaults": {
-              "unit": "cps",
-              "min": 0,
+              "unit": "ops",
               "custom": {
                 "lineInterpolation": "smooth",
-                "fillOpacity": 30,
-                "gradientMode": "opacity",
-                "stacking": {
-                  "mode": "normal"
-                }
+                "fillOpacity": 20,
+                "gradientMode": "opacity"
               }
             },
             "overrides": [
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "trace"
-                },
-                "properties": [
-                  {
-                    "id": "color",
-                    "value": {
-                      "mode": "fixed",
-                      "fixedColor": "light-gray"
-                    }
-                  }
-                ]
-              },
               {
                 "matcher": {
                   "id": "byName",
@@ -3000,7 +2993,7 @@
                     "id": "color",
                     "value": {
                       "mode": "fixed",
-                      "fixedColor": "gray"
+                      "fixedColor": "blue"
                     }
                   }
                 ]
@@ -3049,39 +3042,57 @@
                     }
                   }
                 ]
-              },
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "panic"
-                },
-                "properties": [
-                  {
-                    "id": "color",
-                    "value": {
-                      "mode": "fixed",
-                      "fixedColor": "dark-red"
-                    }
-                  }
-                ]
               }
             ]
           },
           "options": {
             "legend": {
               "displayMode": "table",
-              "placement": "right",
-              "calcs": [
-                "lastNotNull",
-                "mean",
-                "max"
-              ]
+              "placement": "right"
             },
             "tooltip": {
-              "mode": "multi"
+              "mode": "multi",
+              "sort": "desc"
             }
           },
-          "description": "Rate of log messages per second by level across selected nodes. Stacked area shows the composition of log traffic. Spikes in warning/error/panic indicate issues that need investigation. A healthy system shows mostly info (green) with minimal warning/error."
+          "description": "Log messages rate by level across selected nodes."
+        },
+        {
+          "id": 114,
+          "title": "Log Messages per Node",
+          "type": "timeseries",
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 46
+          },
+          "targets": [
+            {
+              "expr": "rate(ergo_log_messages_total{node=~\"$node\",level!=\"trace\",level!=\"panic\"}[1m])",
+              "legendFormat": "{{node}} {{level}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "custom": {
+                "lineInterpolation": "smooth",
+                "fillOpacity": 20,
+                "gradientMode": "opacity"
+              }
+            }
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "right"
+            },
+            "tooltip": {
+              "mode": "single"
+            }
+          },
+          "description": "Log messages rate per node and level. Shows which node generates the most log traffic."
         }
       ]
     },
@@ -3322,111 +3333,6 @@
           "description": "Byte rate between each pair of connected nodes. Identifies which specific node-to-node link is saturated or carrying the most data."
         }
       ]
-    },
-    {
-      "id": 40,
-      "title": "Nodes Overview",
-      "type": "table",
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 46
-      },
-      "targets": [
-        {
-          "expr": "ergo_node_uptime_seconds{node=~\"$node\"}",
-          "format": "table",
-          "instant": true
-        },
-        {
-          "expr": "ergo_processes_total{node=~\"$node\"}",
-          "format": "table",
-          "instant": true
-        },
-        {
-          "expr": "ergo_processes_running{node=~\"$node\"}",
-          "format": "table",
-          "instant": true
-        },
-        {
-          "expr": "ergo_processes_zombie{node=~\"$node\"}",
-          "format": "table",
-          "instant": true
-        },
-        {
-          "expr": "ergo_memory_used_bytes{node=~\"$node\"}",
-          "format": "table",
-          "instant": true
-        }
-      ],
-      "transformations": [
-        {
-          "id": "merge"
-        },
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Time": true,
-              "instance": true,
-              "__name__": true,
-              "endpoint": true,
-              "job": true,
-              "prometheus": true
-            },
-            "renameByName": {
-              "node": "Node",
-              "Value #A": "Uptime",
-              "Value #B": "Processes",
-              "Value #C": "Running",
-              "Value #D": "Zombie",
-              "Value #E": "Memory"
-            }
-          }
-        },
-        {
-          "id": "sortBy",
-          "options": {
-            "fields": {},
-            "sort": [
-              {
-                "field": "Processes",
-                "desc": true
-              }
-            ]
-          }
-        }
-      ],
-      "fieldConfig": {
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Uptime"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "s"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Memory"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "bytes"
-              }
-            ]
-          }
-        ]
-      },
-      "description": "All selected nodes side by side showing Uptime, Processes, Running, Zombie, and Memory. Spot recently restarted nodes (low uptime), overloaded nodes (high process count), or problematic nodes (non-zero zombie count)."
     }
   ],
   "schemaVersion": 38,
