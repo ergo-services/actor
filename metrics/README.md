@@ -86,6 +86,8 @@ When `Mux` is set, the `Port` and `Host` fields are ignored since the caller is 
 
 There are two ways to work with custom metrics: helper functions from any actor, or embedding `metrics.Actor` for direct registry access.
 
+All custom metrics automatically receive a `node` const label set to the node name. Do not include `"node"` in your variable label names -- it will cause a "duplicate label names" registration error.
+
 ### Helper Functions
 
 Any actor on the same node can register and update custom metrics using the helper functions. Registration is a synchronous `Call` (returns error on failure). Updates are asynchronous `Send` (fire-and-forget).
@@ -569,10 +571,6 @@ A collapsed row containing six timeseries graphs. Click to expand. Shows cluster
 - **Network Traffic per Node** -- inbound and outbound byte rate per node. Nodes with disproportionately high byte rate relative to message rate are sending larger payloads -- useful for identifying nodes that transfer bulk data
 - **Network Messages Detail** -- message rate between each pair of connected nodes. Helps trace specific inter-node communication paths and detect unexpected or missing connections
 - **Network Traffic Detail** -- byte rate between each pair of connected nodes. Useful for identifying which specific node-to-node link is saturated or carrying the most data
-
-#### Nodes Overview
-
-A table at the bottom listing all selected nodes with columns: Node name, Uptime, Processes, Running, Zombie, Memory. Sorted by process count (descending). Provides a quick snapshot for comparing nodes side by side -- helps spot nodes that have recently restarted (low uptime), are overloaded (high process count), or have issues (non-zero zombie count).
 
 ## Best Practices
 
