@@ -236,6 +236,17 @@ func (a *Actor) initializeErgoMetrics() error {
 	registerInternalGaugeVec(cm, a.registry, "ergo_remote_bytes_in_total", "Total number of bytes received from remote node", nodeLabels, []string{"remote_node"})
 	registerInternalGaugeVec(cm, a.registry, "ergo_remote_bytes_out_total", "Total number of bytes sent to remote node", nodeLabels, []string{"remote_node"})
 
+	// Network health metrics
+	registerInternalGauge(cm, a.registry, "ergo_connections_established_total", "Cumulative connections established", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_connections_lost_total", "Cumulative connections lost", nodeLabels)
+	registerInternalGaugeVec(cm, a.registry, "ergo_acceptor_handshake_errors_total", "Cumulative handshake errors per acceptor", nodeLabels, []string{"acceptor"})
+
+	// Messaging error metrics
+	registerInternalGauge(cm, a.registry, "ergo_send_errors_local_total", "Cumulative local send errors", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_send_errors_remote_total", "Cumulative remote send errors", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_call_errors_local_total", "Cumulative local call errors", nodeLabels)
+	registerInternalGauge(cm, a.registry, "ergo_call_errors_remote_total", "Cumulative remote call errors", nodeLabels)
+
 	// Initialize sub-metric collectors
 	a.latency.init(cm, a.registry, nodeLabels)
 	a.depth.init(cm, a.registry, nodeLabels)
@@ -328,11 +339,29 @@ func (a *Actor) collectBaseMetrics() error {
 		logVec.WithLabelValues(name).Set(float64(nodeInfo.LogMessages[i]))
 	}
 
+	// Update messaging error metrics
+	gaugeFromMap(cm, "ergo_send_errors_local_total").Set(float64(nodeInfo.SendErrorsLocal))
+	gaugeFromMap(cm, "ergo_send_errors_remote_total").Set(float64(nodeInfo.SendErrorsRemote))
+	gaugeFromMap(cm, "ergo_call_errors_local_total").Set(float64(nodeInfo.CallErrorsLocal))
+	gaugeFromMap(cm, "ergo_call_errors_remote_total").Set(float64(nodeInfo.CallErrorsRemote))
+
 	// Get network information
 	network := a.Node().Network()
 	connectedNodes := network.Nodes()
 
 	// Update network metrics
+	networkInfo, err := network.Info()
+	if err == nil {
+		gaugeFromMap(cm, "ergo_connections_established_total").Set(float64(networkInfo.ConnectionsEstablished))
+		gaugeFromMap(cm, "ergo_connections_lost_total").Set(float64(networkInfo.ConnectionsLost))
+
+		hsErrors := gaugeVecFromMap(cm, "ergo_acceptor_handshake_errors_total")
+		hsErrors.Reset()
+		for _, ai := range networkInfo.Acceptors {
+			hsErrors.WithLabelValues(ai.Interface).Set(float64(ai.HandshakeErrors))
+		}
+	}
+
 	gaugeFromMap(cm, "ergo_connected_nodes_total").Set(float64(len(connectedNodes)))
 
 	remoteUptime := gaugeVecFromMap(cm, "ergo_remote_node_uptime_seconds")

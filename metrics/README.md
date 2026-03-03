@@ -206,6 +206,10 @@ The primary actor initializes base Ergo metrics, starts the HTTP handler, and ru
 | `ergo_events_received_total` | Gauge | Cumulative number of events received from remote nodes |
 | `ergo_events_local_sent_total` | Gauge | Cumulative number of event messages delivered to local subscribers. Reflects actual fanout -- one publish with 100 subscribers produces 100 local deliveries |
 | `ergo_events_remote_sent_total` | Gauge | Cumulative number of event messages sent to remote nodes. Counts one per node, not per subscriber, due to shared subscription optimization |
+| `ergo_send_errors_local_total` | Gauge | Cumulative local send delivery errors (process unknown, terminated, mailbox full) |
+| `ergo_send_errors_remote_total` | Gauge | Cumulative remote send delivery errors (connection failure) |
+| `ergo_call_errors_local_total` | Gauge | Cumulative local call delivery errors (process unknown, terminated, mailbox full) |
+| `ergo_call_errors_remote_total` | Gauge | Cumulative remote call delivery errors (connection failure) |
 
 ### Log Metrics
 
@@ -217,6 +221,9 @@ The primary actor initializes base Ergo metrics, starts the HTTP handler, and ru
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
+| `ergo_connections_established_total` | Gauge | - | Cumulative connections established. Use `rate()` to detect connection churn |
+| `ergo_connections_lost_total` | Gauge | - | Cumulative connections lost. Use `rate()` to detect connection churn |
+| `ergo_acceptor_handshake_errors_total` | Gauge | acceptor | Cumulative handshake errors per acceptor interface |
 | `ergo_connected_nodes_total` | Gauge | - | Total connected nodes |
 | `ergo_remote_node_uptime_seconds` | Gauge | remote_node | Remote node uptime |
 | `ergo_remote_messages_in_total` | Gauge | remote_node | Messages received from node |
@@ -508,7 +515,7 @@ Four table panels (specific events):
 
 #### Process Activity (collapsed row)
 
-A collapsed row containing ten panels organized by topic: message throughput, drains, then process utilization. Click to expand.
+A collapsed row containing twelve panels organized by topic: message throughput, delivery errors, drains, then process utilization. Click to expand.
 
 Two timeseries panels (message throughput overview):
 
@@ -524,6 +531,11 @@ Two panels (drains):
 
 - **Drains per Node** -- per-node drain ratio over time (`rate(messages_in) / rate(wakeups)`). Value ~1 means spare capacity, growing value means processes batch more per wakeup. Complements utilization: two processes with 80% utilization may have drain ~1 (slow callbacks) or drain ~100 (fast callbacks, high volume) -- different problems requiring different solutions
 - **Top Processes by Drains** -- table showing processes with highest drain ratio. Identifies which actors are under the heaviest sustained load
+
+Two timeseries panels (delivery errors):
+
+- **Delivery Errors (Cluster Total)** -- cluster-wide rate of message delivery failures split by type: Send Local (orange), Send Remote (red), Call Local (yellow), Call Remote (dark red). Local errors include process unknown, process terminated, and mailbox full. Remote errors include connection failures. A static cluster should show zero rates; any sustained rate indicates delivery problems worth investigating
+- **Delivery Errors per Node** -- per-node delivery error rates combining send and call errors. Shows which nodes have the most delivery failures. Useful for identifying nodes with connectivity issues (remote errors) or overloaded processes (local errors from mailbox full)
 
 Two timeseries panels (utilization overview):
 
@@ -563,8 +575,10 @@ A collapsed row containing one timeseries graph. Click to expand.
 
 #### Network (collapsed row)
 
-A collapsed row containing six timeseries graphs. Click to expand. Shows cluster-wide totals, per-node breakdowns, and node-pair detail for both message rates and byte rates.
+A collapsed row containing eight timeseries graphs. Click to expand. Shows connection health, handshake errors, cluster-wide totals, per-node breakdowns, and node-pair detail for both message rates and byte rates.
 
+- **Connection Health** -- connection established and lost rates with connected nodes count on the right axis (dashed blue line). In a static cluster between deploys, established and lost rates should be near zero. Sustained churn indicates network instability or nodes restarting
+- **Handshake Errors per Acceptor** -- handshake error rate per acceptor interface. Helps identify which listener is receiving bad connections (wrong protocol, authentication failures, incompatible versions)
 - **Network Messages (Cluster Total)** -- total inbound and outbound message rate across all nodes. Provides a high-level view of cluster communication intensity. Sudden drops may indicate network partitions or node failures
 - **Network Traffic (Cluster Total)** -- total inbound and outbound byte rate across all nodes. Helps estimate bandwidth requirements. A growing gap between message rate and byte rate means average message size is changing
 - **Network Messages per Node** -- inbound and outbound message rate per node. Helps identify which nodes are communication hotspots and whether traffic is evenly distributed
