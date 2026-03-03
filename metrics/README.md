@@ -575,16 +575,16 @@ A collapsed row containing one timeseries graph. Click to expand.
 
 #### Network (collapsed row)
 
-A collapsed row containing eight timeseries graphs. Click to expand. Shows connection health, handshake errors, cluster-wide totals, per-node breakdowns, and node-pair detail for both message rates and byte rates.
+A collapsed row containing eight panels. Click to expand. Shows cluster-wide totals, per-node breakdowns, node-pair detail for both message rates and byte rates, and connection health.
 
-- **Connection Health** -- connection established and lost rates with connected nodes count on the right axis (dashed blue line). In a static cluster between deploys, established and lost rates should be near zero. Sustained churn indicates network instability or nodes restarting
-- **Handshake Errors per Acceptor** -- handshake error rate per acceptor interface. Helps identify which listener is receiving bad connections (wrong protocol, authentication failures, incompatible versions)
 - **Network Messages (Cluster Total)** -- total inbound and outbound message rate across all nodes. Provides a high-level view of cluster communication intensity. Sudden drops may indicate network partitions or node failures
 - **Network Traffic (Cluster Total)** -- total inbound and outbound byte rate across all nodes. Helps estimate bandwidth requirements. A growing gap between message rate and byte rate means average message size is changing
 - **Network Messages per Node** -- inbound and outbound message rate per node. Helps identify which nodes are communication hotspots and whether traffic is evenly distributed
 - **Network Traffic per Node** -- inbound and outbound byte rate per node. Nodes with disproportionately high byte rate relative to message rate are sending larger payloads -- useful for identifying nodes that transfer bulk data
 - **Network Messages Detail** -- message rate between each pair of connected nodes. Helps trace specific inter-node communication paths and detect unexpected or missing connections
 - **Network Traffic Detail** -- byte rate between each pair of connected nodes. Useful for identifying which specific node-to-node link is saturated or carrying the most data
+- **Connected Nodes** -- bar gauge showing the number of connected remote nodes per node. Color indicates health: red (0) -- node is isolated, orange (1) -- degraded, yellow (2) -- partial connectivity, green (3+) -- healthy. Provides instant visibility into cluster connectivity
+- **Connection Events** -- per-node rates of connection established (green), connection lost (red), and handshake errors (orange) on a single chart. In a stable cluster all three are zero. Spikes indicate connection churn or bad incoming connections
 
 ## Best Practices
 
