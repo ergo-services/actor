@@ -427,164 +427,25 @@ A pre-built Grafana dashboard is included in `ergo-cluster.json`. It provides a 
 
 The dashboard includes a `$node` variable dropdown at the top. It allows selecting one or more nodes to filter all panels. By default, all nodes are selected.
 
-### Panels
+### Dashboard Rows
 
-#### Summary Row (top)
+**Summary** (top, always visible) -- cluster-wide snapshot: process counts (total, running, zombie), memory usage, node count. Zombie > 0 or unexpected node count drop means something is wrong.
 
-Six stat panels showing aggregated values for selected nodes:
+**Mailbox Latency** (expanded, requires `-tags=latency`) -- mailbox wait times: max latency, stressed process count, latency distribution, and top-N stressed processes. Answers "are actors keeping up with their workload?" Requires building with `-tags=latency`, otherwise shows "No data".
 
-- **Total Processes** -- total number of processes across selected nodes
-- **Running** -- number of processes currently executing callbacks or waiting for a Call response. The gap between Total and Running is normal -- most processes spend their time in Sleep state (idle, waiting for messages)
-- **Zombie** -- number of zombie processes (green when 0, red when 1 or more). Non-zero value signals that some processes have terminated abnormally and were not properly cleaned up -- requires investigation
-- **Memory Used** -- total OS memory used across selected nodes
-- **Memory Alloc** -- total runtime memory allocated across selected nodes. A significant difference between Used and Alloc may indicate memory fragmentation or that the runtime is holding memory that could be released
-- **Total Nodes** -- number of nodes matching the filter. Useful for quickly detecting if a node has left the cluster unexpectedly
+**Mailbox Depth** (expanded) -- mailbox queue sizes: max depth per node, depth distribution, top-N by depth. Complementary to latency -- depth is "how many messages are waiting", latency is "how long the oldest has been waiting".
 
-#### Mailbox Latency (expanded row, requires `-tags=latency`)
+**Events** (collapsed) -- pub/sub health: publish/delivery rates, event utilization states (active, idle, no subscribers, no publishing), per-node breakdown, and top-N tables by subscribers, published, local deliveries, remote sent.
 
-An expanded row that appears right after the Summary. Only useful when the application is built with `-tags=latency`. When the tag is not used, these panels will show "No data".
+**Process Activity** (collapsed) -- actor workload analysis: message throughput and wakeup rates, drain ratio (messages processed per wakeup), process utilization distribution, actor running time, and delivery error rates (Send/Call failures split by local/remote).
 
-Two timeseries panels at the top showing cluster-wide overview:
+**Processes** (collapsed) -- process lifecycle: counts per node, spawn/termination rates, init time per node, top-N by init time. Growing count without plateau suggests leaks, spawn failures indicate resource exhaustion.
 
-- **Max Latency** -- maximum mailbox latency across all selected nodes over time. Drawn in red. Hover on any point to see the exact value at that moment. A value above 1 second means at least one process has a message sitting in its mailbox for that long -- the process is either overloaded or stuck
-- **Stressed Processes** -- stacked timeseries showing two categories: processes with latency under 1ms (light-blue, typically normal) and processes with latency 1ms or above (orange, worth attention). The total height is the number of processes with non-empty mailboxes. A growing orange area indicates increasing backpressure
+**Resources** (collapsed) -- CPU and memory per node. User/system CPU normalized by core count, OS memory used, runtime memory allocated. Monotonic memory growth signals leaks.
 
-Two timeseries graphs showing per-node breakdown:
+**Logging** (collapsed) -- log message rate by level. Spikes in warning/error indicate issues.
 
-- **Max Latency per Node** -- maximum mailbox latency per node over time. Helps identify which specific nodes are experiencing backpressure. Persistent high latency on a single node while others are low points to a hotspot or a stuck process on that node
-- **Stressed Processes per Node** -- number of processes with non-empty mailboxes per node over time. Correlate with the Max Latency panel -- a node with high max latency but low stressed count has one problematic process, while high count with moderate latency suggests general overload
-
-One stacked timeseries panel:
-
-- **Latency Distribution** -- stacked area chart showing how many processes fall into each latency range over time. Uses a flame color gradient: green tones for low latency (1ms-10ms), yellow for moderate (50ms-100ms), orange for high (500ms-1s), red/dark-red for critical (5s-60s+). The legend is sorted from highest to lowest range. In a healthy system most of the area should be green/yellow. Growing red/orange areas indicate degradation
-
-One table panel:
-
-- **Top Stressed Processes** -- Top-N processes by mailbox latency across the cluster. Columns: Application, Behavior, Name, PID, Node, Latency (plus Kubernetes labels when available: Pod, Container, Cluster, Service). Sorted by latency descending. Directly answers "which process is the bottleneck?"
-
-#### Reading the Latency Dashboard
-
-**Start here: Max Latency and Stressed Processes (top row).** These two panels give an immediate answer to "is there a problem right now?" If Max Latency is under 100ms and the Stressed Processes panel is mostly light-blue or empty -- the system is healthy, no further investigation needed.
-
-**React to these signals:**
-
-- Max Latency above 1 second -- at least one process is severely behind. Move to the Top Stressed Processes table to identify it by name, application, and behavior
-- Orange area growing in Stressed Processes -- multiple processes are accumulating latency above 1ms. Check the Latency Distribution panel to understand the severity spread
-- A sudden spike in Max Latency followed by a return to normal -- a temporary burst of load. Compare with spawn/termination rates in the Processes row to see if it correlates with process lifecycle events
-
-**Dig deeper:**
-
-1. **Identify the node.** Check Max Latency per Node and Stressed Processes per Node. If one node stands out while others are calm, the problem is localized -- look at that node's Resources and Network panels
-2. **Identify the process.** Open the Top Stressed Processes table. The columns Application, Behavior, and Name tell you exactly what kind of actor is struggling. Multiple processes from the same application suggest the application itself is under pressure. A single process with extreme latency is likely stuck or blocked
-3. **Understand the distribution.** The Latency Distribution panel shows whether the problem is isolated (one red sliver at the top of an otherwise green chart) or systemic (the entire chart shifting from green toward orange/red over time). A systemic shift means the node is overloaded and needs either scaling or load shedding
-4. **Correlate with other panels.** High latency combined with high CPU suggests compute-bound processes. High latency with low CPU suggests processes are blocked on external I/O or waiting for responses from other actors. High latency with growing memory may indicate unbounded mailbox accumulation
-
-#### Mailbox Depth (expanded row)
-
-Three panels showing how many messages are currently queued in process mailboxes. Complementary to latency -- depth tells you "how many", latency tells you "how long".
-
-- **Max Depth per Node** -- maximum mailbox queue depth per node over time. A growing value means at least one process is accumulating messages faster than it can process them. Compare with the latency Max Latency panel -- high depth with low latency means the process handles messages quickly but receives many; high depth with high latency means it is falling behind
-- **Depth Distribution** -- stacked area chart showing how many processes fall into each depth range over time. Uses a flame color gradient: green tones for low depth (1-10 messages), yellow for moderate (50-100), orange for high (500-1K), red for critical (5K-10K+). In a healthy system most processes should have low depth. A shift toward red indicates growing backpressure
-- **Top Processes by Depth** -- table showing processes with the deepest mailbox queues across the cluster. Columns: Application, Behavior, Name, PID, Node, Depth (plus Kubernetes labels when available). Sorted by depth descending. Use this to identify which actors are accumulating the most messages
-
-#### Events (collapsed row)
-
-A collapsed row containing ten panels. Click to expand. Organized from general to specific: cluster-wide rates and utilization, per-node breakdown, per-node rates, and top-N tables.
-
-Two timeseries panels (cluster-wide overview):
-
-- **Event Publish/Delivery Rate** -- four lines showing event throughput. Published (blue) shows how often local producers publish. Received (cyan) shows events arriving from remote nodes. Local Delivered (green) shows actual fanout to local subscribers. Remote Sent (orange) shows messages sent to other nodes (one per node due to shared subscription optimization)
-- **Event Utilization** -- stacked timeseries showing the utilization state of all registered events. Active (green): publishing with subscribers -- event is working. On Demand (blue): uses Notify mechanism, waiting for subscribers or data -- correct behavior. Idle (grey): registered without Notify, no publishes, no subscribers -- potentially forgotten. No Subscribers (orange): publishing but nobody listening. No Publishing (yellow): subscribers waiting but producer never published. The total height equals the total number of registered events. A healthy system is mostly green and blue
-
-Two timeseries panels (per-node rates):
-
-- **Event Publish Rate per Node** -- event publish rate per node. Shows which nodes have the most active producers. A spike on one node while others are stable points to a localized producer issue
-- **Event Delivery Rate per Node** -- local event delivery rate per node. Shows where fanout load concentrates. High delivery rate relative to publish rate indicates events with many subscribers on that node
-
-Two timeseries panels (per-node counts):
-
-- **Registered Events per Node** -- total number of registered events per node. A growing count without plateaus may indicate event registration leak (events being registered but never unregistered)
-- **Max Subscribers per Node** -- maximum subscriber count for any single event on each node. A high value means at least one event has many consumers, which amplifies the cost of each publish
-
-Four table panels (specific events):
-
-- **Top Events by Subscribers** -- Top-N events by subscriber count. Columns: Event, Producer, Node, Subscribers. Sorted by subscribers descending. Identifies events with the widest audience
-- **Top Events by Published** -- Top-N events by messages published. Columns: Event, Producer, Node, Published. Sorted by published descending. Identifies the most active producers
-- **Top Events by Local Deliveries** -- Top-N events by messages delivered to local subscribers. Columns: Event, Producer, Node, Local Deliveries. Sorted descending. Shows which events create the most local fanout load. An event that publishes rarely but has many subscribers will rank high here
-- **Top Events by Remote Sent** -- Top-N events by messages sent to remote nodes. Columns: Event, Producer, Node, Remote Sent. Sorted descending. Shows which events generate the most inter-node traffic
-
-#### Process Activity (collapsed row)
-
-A collapsed row containing twelve panels organized by topic: message throughput, delivery errors, drains, then process utilization. Click to expand.
-
-Two timeseries panels (message throughput overview):
-
-- **Message Throughput (Cluster Total)** -- cluster-wide message rate showing inbound, outbound, and wakeup rates. The gap between In and Wakeups shows drain effect: when they track together -- spare capacity, when In >> Wakeups -- processes batching under load
-- **Message Throughput per Node** -- same three rates per node. Identifies nodes where processes batch the most
-
-Two table panels (message throughput top-N):
-
-- **Top Processes by Messages In** -- Top-N processes by total messages received (cumulative). Identifies which actors handle the most inbound traffic
-- **Top Processes by Messages Out** -- Top-N processes by total messages sent (cumulative). Identifies which actors generate the most outbound traffic
-
-Two panels (drains):
-
-- **Drains per Node** -- per-node drain ratio over time (`rate(messages_in) / rate(wakeups)`). Value ~1 means spare capacity, growing value means processes batch more per wakeup. Complements utilization: two processes with 80% utilization may have drain ~1 (slow callbacks) or drain ~100 (fast callbacks, high volume) -- different problems requiring different solutions
-- **Top Processes by Drains** -- table showing processes with highest drain ratio. Identifies which actors are under the heaviest sustained load
-
-Two timeseries panels (delivery errors):
-
-- **Delivery Errors (Cluster Total)** -- cluster-wide rate of message delivery failures split by type: Send Local (orange), Send Remote (red), Call Local (yellow), Call Remote (dark red). Local errors include process unknown, process terminated, and mailbox full. Remote errors include connection failures. A static cluster should show zero rates; any sustained rate indicates delivery problems worth investigating
-- **Delivery Errors per Node** -- per-node delivery error rates combining send and call errors. Shows which nodes have the most delivery failures. Useful for identifying nodes with connectivity issues (remote errors) or overloaded processes (local errors from mailbox full)
-
-Two timeseries panels (utilization overview):
-
-- **Utilization Distribution** -- stacked area chart showing how many processes fall into each utilization range (1%-90%+). Utilization is `RunningTime / Uptime`. A shift toward higher ranges indicates increasing compute load
-- **Max Utilization per Node** -- maximum process utilization per node. Persistently high values indicate a compute-bound actor that may need load distribution
-
-Two panels (utilization detail):
-
-- **Actor Running Time per Node** -- `rate(ergo_process_running_time_seconds)` per node, showing seconds of callback execution per second. When this approaches CPU core count, the node is compute-saturated
-- **Top Processes by Utilization** -- table showing the busiest processes by lifetime utilization. A process at 90%+ is almost always busy
-
-#### Processes (collapsed row)
-
-A collapsed row containing six panels. Click to expand.
-
-- **Processes (total)** -- total process count per node. Steady growth without a plateau may indicate a process leak (processes being spawned but never terminated)
-- **Processes (running)** -- running process count per node. Helps identify load distribution across the cluster -- uneven running counts may point to hotspot nodes
-- **Process Spawn Rate** -- rate of successfully spawned processes per node. Also shows failed spawn attempts (in red). Spawn failures indicate resource exhaustion or configuration errors. A sudden spike in spawn rate may signal a restart loop
-- **Process Termination Rate** -- rate of terminated processes per node. When termination rate consistently exceeds spawn rate, the node is draining. When spawn rate exceeds termination rate, process count is growing -- correlate with the Processes panel to verify
-- **Init Time per Node** -- bar gauge showing maximum ProcessInit duration per node. Color indicates severity: green < 100ms, yellow < 1s, red > 1s. Shows at a glance which nodes have slow initialization
-- **Top Processes by Init Time** -- table showing processes with the longest ProcessInit duration. Identifies which actor types take the longest to initialize
-
-#### Resources (collapsed row)
-
-A collapsed row containing four timeseries graphs. Click to expand.
-
-- **CPU User Time per Node** -- user CPU time percentage per node, normalized by core count. High user CPU indicates the application logic is compute-bound. Useful for identifying nodes that need horizontal scaling
-- **CPU System Time per Node** -- system CPU time percentage per node, normalized by core count. High system CPU relative to user CPU suggests excessive syscalls, context switching, or I/O pressure rather than application workload
-- **Memory (OS:used)** -- OS-reported memory used per node. Monotonic growth over time is a strong indicator of a memory leak. Compare across nodes to spot outliers
-- **Memory (Runtime:alloc)** -- Go runtime allocated memory per node. Sawtooth pattern is normal (allocation followed by GC). Flat or steadily rising baseline between GC cycles points to objects that are not being collected
-
-#### Logging (collapsed row)
-
-A collapsed row containing one timeseries graph. Click to expand.
-
-- **Log Messages Rate** -- rate of log messages per second by level as a stacked area chart. Colors follow severity: trace and debug are gray, info is green, warning is yellow, error is red, panic is dark red. A healthy system is mostly green. Spikes in warning or error indicate issues worth investigating. Counting happens once before fan-out to loggers, so the numbers are accurate regardless of how many loggers are registered
-
-#### Network (collapsed row)
-
-A collapsed row containing eight panels. Click to expand. Shows cluster-wide totals, per-node breakdowns, node-pair detail for both message rates and byte rates, and connection health.
-
-- **Network Messages (Cluster Total)** -- total inbound and outbound message rate across all nodes. Provides a high-level view of cluster communication intensity. Sudden drops may indicate network partitions or node failures
-- **Network Traffic (Cluster Total)** -- total inbound and outbound byte rate across all nodes. Helps estimate bandwidth requirements. A growing gap between message rate and byte rate means average message size is changing
-- **Network Messages per Node** -- inbound and outbound message rate per node. Helps identify which nodes are communication hotspots and whether traffic is evenly distributed
-- **Network Traffic per Node** -- inbound and outbound byte rate per node. Nodes with disproportionately high byte rate relative to message rate are sending larger payloads -- useful for identifying nodes that transfer bulk data
-- **Network Messages Detail** -- message rate between each pair of connected nodes. Helps trace specific inter-node communication paths and detect unexpected or missing connections
-- **Network Traffic Detail** -- byte rate between each pair of connected nodes. Useful for identifying which specific node-to-node link is saturated or carrying the most data
-- **Connected Nodes** -- bar gauge showing the number of connected remote nodes per node. Color indicates health: red (0) -- node is isolated, orange (1) -- degraded, yellow (2) -- partial connectivity, green (3+) -- healthy. Provides instant visibility into cluster connectivity
-- **Connection Events** -- per-node rates of connection established (green), connection lost (red), and handshake errors (orange) on a single chart. In a stable cluster all three are zero. Spikes indicate connection churn or bad incoming connections
+**Network** (collapsed) -- inter-node communication: message and byte rates (cluster total, per node, per node pair), connectivity strength (full mesh percentage as stat and per-node bar gauge), and connection events (established/lost/handshake errors).
 
 ## Best Practices
 
