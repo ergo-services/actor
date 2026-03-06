@@ -1,7 +1,6 @@
 package metrics
 
 import (
-	"container/heap"
 	"sync"
 
 	"ergo.services/ergo/gen"
@@ -23,7 +22,7 @@ type utilizationMetrics struct {
 	// per-cycle accumulators
 	max     float64
 	buckets []float64
-	heap    *utilHeap
+	heap    *topNHeap
 }
 
 func (um *utilizationMetrics) init(cm *sync.Map, registry *prometheus.Registry, nodeLabels prometheus.Labels) {
@@ -48,7 +47,7 @@ func (um *utilizationMetrics) init(cm *sync.Map, registry *prometheus.Registry, 
 func (um *utilizationMetrics) begin() {
 	um.max = 0
 	um.buckets = make([]float64, len(utilizationBoundaries)+1)
-	um.heap = &utilHeap{}
+	um.heap = newTopNHeap(TopNMax)
 }
 
 func (um *utilizationMetrics) observe(info gen.ProcessShortInfo, topN int) {
@@ -81,20 +80,12 @@ func (um *utilizationMetrics) observe(info gen.ProcessShortInfo, topN int) {
 		um.buckets[len(utilizationBoundaries)]++
 	}
 
-	entry := utilEntry{
-		utilization: utilization,
-		pid:         info.PID.String(),
-		name:        string(info.Name),
-		application: string(info.Application),
-		behavior:    info.Behavior,
-	}
-
-	if um.heap.Len() < topN {
-		heap.Push(um.heap, entry)
-	} else if utilization > (*um.heap)[0].utilization {
-		(*um.heap)[0] = entry
-		heap.Fix(um.heap, 0)
-	}
+	um.heap.Observe(utilization, []string{
+		info.PID.String(),
+		string(info.Name),
+		string(info.Application),
+		info.Behavior,
+	}, topN)
 }
 
 func (um *utilizationMetrics) flush() {
@@ -105,43 +96,5 @@ func (um *utilizationMetrics) flush() {
 		distribution.WithLabelValues(label).Set(um.buckets[i])
 	}
 
-	topUtil := gaugeVecFromMap(um.cm, "ergo_process_utilization_top")
-	topUtil.Reset()
-	for _, e := range *um.heap {
-		topUtil.WithLabelValues(
-			e.pid,
-			e.name,
-			e.application,
-			e.behavior,
-		).Set(e.utilization)
-	}
+	um.heap.Flush(gaugeVecFromMap(um.cm, "ergo_process_utilization_top"))
 }
-
-//
-// min-heap for top-N by utilization
-//
-
-type utilEntry struct {
-	utilization float64
-	pid         string
-	name        string
-	application string
-	behavior    string
-}
-
-type utilHeap []utilEntry
-
-func (h utilHeap) Len() int            { return len(h) }
-func (h utilHeap) Less(i, j int) bool  { return h[i].utilization < h[j].utilization }
-func (h utilHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
-func (h *utilHeap) Push(x any)         { *h = append(*h, x.(utilEntry)) }
-func (h *utilHeap) Pop() any {
-	old := *h
-	n := len(old)
-	item := old[n-1]
-	*h = old[:n-1]
-	return item
-}
-
-// compile-time check
-var _ heap.Interface = (*utilHeap)(nil)

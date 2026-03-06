@@ -3,7 +3,6 @@
 package metrics
 
 import (
-	"container/heap"
 	"fmt"
 	"sync"
 
@@ -39,7 +38,7 @@ type latencyMetrics struct {
 	maxLat   float64
 	stressed float64
 	buckets  []float64
-	heap     *topNHeap
+	heap *topNHeap
 }
 
 func (lm *latencyMetrics) init(cm *sync.Map, registry *prometheus.Registry, nodeLabels prometheus.Labels) {
@@ -70,7 +69,7 @@ func (lm *latencyMetrics) begin() {
 	lm.maxLat = 0
 	lm.stressed = 0
 	lm.buckets = make([]float64, len(latencyBoundaries)+1)
-	lm.heap = &topNHeap{}
+	lm.heap = newTopNHeap(TopNMax)
 }
 
 func (lm *latencyMetrics) observe(info gen.ProcessShortInfo, topN int) {
@@ -98,20 +97,12 @@ func (lm *latencyMetrics) observe(info gen.ProcessShortInfo, topN int) {
 		lm.buckets[len(latencyBoundaries)]++ // >60s
 	}
 
-	entry := topNEntry{
-		seconds:     seconds,
-		pid:         info.PID.String(),
-		name:        string(info.Name),
-		application: string(info.Application),
-		behavior:    info.Behavior,
-	}
-
-	if lm.heap.Len() < topN {
-		heap.Push(lm.heap, entry)
-	} else if seconds > (*lm.heap)[0].seconds {
-		(*lm.heap)[0] = entry
-		heap.Fix(lm.heap, 0)
-	}
+	lm.heap.Observe(seconds, []string{
+		info.PID.String(),
+		string(info.Name),
+		string(info.Application),
+		info.Behavior,
+	}, topN)
 }
 
 func (lm *latencyMetrics) flush() {
@@ -123,43 +114,5 @@ func (lm *latencyMetrics) flush() {
 		distribution.WithLabelValues(label).Set(lm.buckets[i])
 	}
 
-	topLatency := gaugeVecFromMap(lm.cm, "ergo_mailbox_latency_top_seconds")
-	topLatency.Reset()
-	for _, e := range *lm.heap {
-		topLatency.WithLabelValues(
-			e.pid,
-			e.name,
-			e.application,
-			e.behavior,
-		).Set(e.seconds)
-	}
+	lm.heap.Flush(gaugeVecFromMap(lm.cm, "ergo_mailbox_latency_top_seconds"))
 }
-
-//
-// min-heap for top-N selection
-//
-
-type topNEntry struct {
-	seconds     float64
-	pid         string
-	name        string
-	application string
-	behavior    string
-}
-
-type topNHeap []topNEntry
-
-func (h topNHeap) Len() int            { return len(h) }
-func (h topNHeap) Less(i, j int) bool  { return h[i].seconds < h[j].seconds }
-func (h topNHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
-func (h *topNHeap) Push(x any)         { *h = append(*h, x.(topNEntry)) }
-func (h *topNHeap) Pop() any {
-	old := *h
-	n := len(old)
-	item := old[n-1]
-	*h = old[:n-1]
-	return item
-}
-
-// compile-time check
-var _ heap.Interface = (*topNHeap)(nil)

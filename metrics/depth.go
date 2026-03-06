@@ -1,7 +1,6 @@
 package metrics
 
 import (
-	"container/heap"
 	"fmt"
 	"sync"
 
@@ -34,7 +33,7 @@ type depthMetrics struct {
 	// per-cycle accumulators
 	max     uint64
 	buckets []float64
-	heap    *depthHeap
+	heap    *topNHeap
 }
 
 func (dm *depthMetrics) init(cm *sync.Map, registry *prometheus.Registry, nodeLabels prometheus.Labels) {
@@ -59,7 +58,7 @@ func (dm *depthMetrics) init(cm *sync.Map, registry *prometheus.Registry, nodeLa
 func (dm *depthMetrics) begin() {
 	dm.max = 0
 	dm.buckets = make([]float64, len(depthBoundaries)+1)
-	dm.heap = &depthHeap{}
+	dm.heap = newTopNHeap(TopNMax)
 }
 
 func (dm *depthMetrics) observe(info gen.ProcessShortInfo, topN int) {
@@ -85,20 +84,12 @@ func (dm *depthMetrics) observe(info gen.ProcessShortInfo, topN int) {
 		dm.buckets[len(depthBoundaries)]++
 	}
 
-	entry := depthEntry{
-		depth:       depth,
-		pid:         info.PID.String(),
-		name:        string(info.Name),
-		application: string(info.Application),
-		behavior:    info.Behavior,
-	}
-
-	if dm.heap.Len() < topN {
-		heap.Push(dm.heap, entry)
-	} else if depth > (*dm.heap)[0].depth {
-		(*dm.heap)[0] = entry
-		heap.Fix(dm.heap, 0)
-	}
+	dm.heap.Observe(float64(depth), []string{
+		info.PID.String(),
+		string(info.Name),
+		string(info.Application),
+		info.Behavior,
+	}, topN)
 }
 
 func (dm *depthMetrics) flush() {
@@ -109,43 +100,5 @@ func (dm *depthMetrics) flush() {
 		distribution.WithLabelValues(label).Set(dm.buckets[i])
 	}
 
-	topDepth := gaugeVecFromMap(dm.cm, "ergo_mailbox_depth_top")
-	topDepth.Reset()
-	for _, e := range *dm.heap {
-		topDepth.WithLabelValues(
-			e.pid,
-			e.name,
-			e.application,
-			e.behavior,
-		).Set(float64(e.depth))
-	}
+	dm.heap.Flush(gaugeVecFromMap(dm.cm, "ergo_mailbox_depth_top"))
 }
-
-//
-// min-heap for top-N by depth
-//
-
-type depthEntry struct {
-	depth       uint64
-	pid         string
-	name        string
-	application string
-	behavior    string
-}
-
-type depthHeap []depthEntry
-
-func (h depthHeap) Len() int            { return len(h) }
-func (h depthHeap) Less(i, j int) bool  { return h[i].depth < h[j].depth }
-func (h depthHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
-func (h *depthHeap) Push(x any)         { *h = append(*h, x.(depthEntry)) }
-func (h *depthHeap) Pop() any {
-	old := *h
-	n := len(old)
-	item := old[n-1]
-	*h = old[:n-1]
-	return item
-}
-
-// compile-time check
-var _ heap.Interface = (*depthHeap)(nil)

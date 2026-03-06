@@ -1,7 +1,6 @@
 package metrics
 
 import (
-	"container/heap"
 	"sync"
 
 	"ergo.services/ergo/gen"
@@ -15,10 +14,10 @@ type eventMetrics struct {
 	// per-cycle accumulators
 	max            int64
 	utilCounts     [5]float64 // active, on_demand, idle, no_subscribers, no_publishing
-	heapSubs       *eventHeap
-	heapPublished  *eventHeap
-	heapLocalSent  *eventHeap
-	heapRemoteSent *eventHeap
+	heapSubs       *topNHeap
+	heapPublished  *topNHeap
+	heapLocalSent  *topNHeap
+	heapRemoteSent *topNHeap
 }
 
 func (em *eventMetrics) init(cm *sync.Map, registry *prometheus.Registry, nodeLabels prometheus.Labels) {
@@ -58,10 +57,10 @@ func (em *eventMetrics) init(cm *sync.Map, registry *prometheus.Registry, nodeLa
 func (em *eventMetrics) begin() {
 	em.max = 0
 	em.utilCounts = [5]float64{}
-	em.heapSubs = &eventHeap{}
-	em.heapPublished = &eventHeap{}
-	em.heapLocalSent = &eventHeap{}
-	em.heapRemoteSent = &eventHeap{}
+	em.heapSubs = newTopNHeap(TopNMax)
+	em.heapPublished = newTopNHeap(TopNMax)
+	em.heapLocalSent = newTopNHeap(TopNMax)
+	em.heapRemoteSent = newTopNHeap(TopNMax)
 }
 
 func (em *eventMetrics) observe(info gen.EventInfo, topN int) {
@@ -84,41 +83,24 @@ func (em *eventMetrics) observe(info gen.EventInfo, topN int) {
 		em.utilCounts[4]++ // no_publishing
 	}
 
-	eventName := string(info.Event.Name)
-	producer := info.Producer.String()
+	labels := []string{string(info.Event.Name), info.Producer.String()}
 
 	// top-N by subscribers
-	eventHeapPush(em.heapSubs, eventEntry{
-		value:    subs,
-		event:    eventName,
-		producer: producer,
-	}, topN)
+	em.heapSubs.Observe(float64(subs), labels, topN)
 
 	// top-N by messages published
 	if info.MessagesPublished > 0 {
-		eventHeapPush(em.heapPublished, eventEntry{
-			value:    info.MessagesPublished,
-			event:    eventName,
-			producer: producer,
-		}, topN)
+		em.heapPublished.Observe(float64(info.MessagesPublished), labels, topN)
 	}
 
 	// top-N by local deliveries
 	if info.MessagesLocalSent > 0 {
-		eventHeapPush(em.heapLocalSent, eventEntry{
-			value:    info.MessagesLocalSent,
-			event:    eventName,
-			producer: producer,
-		}, topN)
+		em.heapLocalSent.Observe(float64(info.MessagesLocalSent), labels, topN)
 	}
 
 	// top-N by remote sent
 	if info.MessagesRemoteSent > 0 {
-		eventHeapPush(em.heapRemoteSent, eventEntry{
-			value:    info.MessagesRemoteSent,
-			event:    eventName,
-			producer: producer,
-		}, topN)
+		em.heapRemoteSent.Observe(float64(info.MessagesRemoteSent), labels, topN)
 	}
 }
 
@@ -132,58 +114,8 @@ func (em *eventMetrics) flush() {
 	utilization.WithLabelValues("no_subscribers").Set(em.utilCounts[3])
 	utilization.WithLabelValues("no_publishing").Set(em.utilCounts[4])
 
-	eventGaugeFlush(gaugeVecFromMap(em.cm, "ergo_event_subscribers_top"), em.heapSubs)
-	eventGaugeFlush(gaugeVecFromMap(em.cm, "ergo_event_published_top"), em.heapPublished)
-	eventGaugeFlush(gaugeVecFromMap(em.cm, "ergo_event_local_sent_top"), em.heapLocalSent)
-	eventGaugeFlush(gaugeVecFromMap(em.cm, "ergo_event_remote_sent_top"), em.heapRemoteSent)
+	em.heapSubs.Flush(gaugeVecFromMap(em.cm, "ergo_event_subscribers_top"))
+	em.heapPublished.Flush(gaugeVecFromMap(em.cm, "ergo_event_published_top"))
+	em.heapLocalSent.Flush(gaugeVecFromMap(em.cm, "ergo_event_local_sent_top"))
+	em.heapRemoteSent.Flush(gaugeVecFromMap(em.cm, "ergo_event_remote_sent_top"))
 }
-
-//
-// helpers
-//
-
-func eventHeapPush(h *eventHeap, e eventEntry, topN int) {
-	if h.Len() < topN {
-		heap.Push(h, e)
-	} else if e.value > (*h)[0].value {
-		(*h)[0] = e
-		heap.Fix(h, 0)
-	}
-}
-
-func eventGaugeFlush(g *prometheus.GaugeVec, h *eventHeap) {
-	g.Reset()
-	for _, e := range *h {
-		g.WithLabelValues(
-			e.event,
-			e.producer,
-		).Set(float64(e.value))
-	}
-}
-
-//
-// min-heap for top-N event entries
-//
-
-type eventEntry struct {
-	value    int64
-	event    string
-	producer string
-}
-
-type eventHeap []eventEntry
-
-func (h eventHeap) Len() int            { return len(h) }
-func (h eventHeap) Less(i, j int) bool  { return h[i].value < h[j].value }
-func (h eventHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
-func (h *eventHeap) Push(x any)         { *h = append(*h, x.(eventEntry)) }
-func (h *eventHeap) Pop() any {
-	old := *h
-	n := len(old)
-	item := old[n-1]
-	*h = old[:n-1]
-	return item
-}
-
-// compile-time check
-var _ heap.Interface = (*eventHeap)(nil)

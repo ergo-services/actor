@@ -12,6 +12,7 @@ const (
 	MetricGauge     MetricType = 1
 	MetricCounter   MetricType = 2
 	MetricHistogram MetricType = 3
+	MetricTopN      MetricType = 4
 )
 
 // RegisterRequest is a sync request (via Call) to register a custom metric.
@@ -59,6 +60,23 @@ type MessageCounterAdd struct {
 // MessageHistogramObserve observes a value on a registered histogram metric.
 type MessageHistogramObserve struct {
 	Name   string
+	Value  float64
+	Labels []string
+}
+
+// RegisterTopNRequest is a sync request (via Call) to register a custom top-N metric.
+// The metric is managed by a dedicated actor spawned under a SOFO supervisor.
+// Returns RegisterResponse.
+type RegisterTopNRequest struct {
+	Name   string
+	Help   string
+	TopN   int
+	Order  TopNOrder
+	Labels []string
+}
+
+// MessageTopNObserve sends a value observation to a top-N metric actor.
+type MessageTopNObserve struct {
 	Value  float64
 	Labels []string
 }

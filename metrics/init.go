@@ -8,13 +8,16 @@ import (
 func init() {
 	types := []any{
 		MetricType(0),
+		TopNOrder(0),
 		RegisterRequest{},
 		RegisterResponse{},
+		RegisterTopNRequest{},
 		MessageUnregister{},
 		MessageGaugeSet{},
 		MessageGaugeAdd{},
 		MessageCounterAdd{},
 		MessageHistogramObserve{},
+		MessageTopNObserve{},
 	}
 
 	for _, t := range types {

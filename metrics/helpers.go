@@ -77,3 +77,31 @@ func CounterAdd(process gen.Process, to any, name string, value float64, labels 
 func HistogramObserve(process gen.Process, to any, name string, value float64, labels []string) error {
 	return process.Send(to, MessageHistogramObserve{Name: name, Value: value, Labels: labels})
 }
+
+// RegisterTopN registers a top-N metric on the target supervisor (sync Call).
+// The supervisor spawns a dedicated actor to manage the metric.
+func RegisterTopN(process gen.Process, to any, name, help string, topN int, order TopNOrder, labels []string) error {
+	result, err := process.Call(to, RegisterTopNRequest{
+		Name:   name,
+		Help:   help,
+		TopN:   topN,
+		Order:  order,
+		Labels: labels,
+	})
+	if err != nil {
+		return err
+	}
+	resp, ok := result.(RegisterResponse)
+	if ok == false {
+		return fmt.Errorf("unexpected response type: %T", result)
+	}
+	if resp.Error != "" {
+		return fmt.Errorf("%s", resp.Error)
+	}
+	return nil
+}
+
+// TopNObserve sends a value observation to a top-N metric actor (async Send).
+func TopNObserve(process gen.Process, to any, value float64, labels []string) error {
+	return process.Send(to, MessageTopNObserve{Value: value, Labels: labels})
+}
