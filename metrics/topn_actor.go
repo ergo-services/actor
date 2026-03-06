@@ -10,6 +10,18 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+// TopNActorOptions holds configuration for a top-N metric actor.
+type TopNActorOptions struct {
+	Name     string
+	Help     string
+	Labels   []string
+	TopN     int
+	Order    TopNOrder
+	Shared   *Shared
+	Interval time.Duration
+	Owner    gen.PID
+}
+
 // TopNActorFactory returns a new topN actor instance.
 func TopNActorFactory() gen.ProcessBehavior {
 	return &topNActor{}
@@ -26,7 +38,7 @@ type topNActor struct {
 
 	heap     *topNHeap
 	gaugeVec *prometheus.GaugeVec
-	registry *prometheus.Registry
+	shared   *Shared
 	interval time.Duration
 	owner    gen.PID
 }
@@ -34,19 +46,22 @@ type topNActor struct {
 type messageFlush struct{}
 
 func (a *topNActor) Init(args ...any) error {
-	// args: name, help, labels, topN, order, registry, interval, owner
-	if len(args) < 8 {
-		return fmt.Errorf("topn actor: expected 8 args, got %d", len(args))
+	if len(args) < 1 {
+		return fmt.Errorf("topn actor: expected TopNActorOptions arg")
+	}
+	opts, ok := args[0].(TopNActorOptions)
+	if ok == false {
+		return fmt.Errorf("topn actor: expected TopNActorOptions, got %T", args[0])
 	}
 
-	a.metricName = args[0].(string)
-	a.help = args[1].(string)
-	a.labels = args[2].([]string)
-	a.topN = args[3].(int)
-	a.order = args[4].(TopNOrder)
-	a.registry = args[5].(*prometheus.Registry)
-	a.interval = args[6].(time.Duration)
-	a.owner = args[7].(gen.PID)
+	a.metricName = opts.Name
+	a.help = opts.Help
+	a.labels = opts.Labels
+	a.topN = opts.TopN
+	a.order = opts.Order
+	a.shared = opts.Shared
+	a.interval = opts.Interval
+	a.owner = opts.Owner
 
 	// register process name for direct addressing
 	if err := a.RegisterName(gen.Atom("radar_topn_" + a.metricName)); err != nil {
@@ -63,7 +78,7 @@ func (a *topNActor) Init(args ...any) error {
 		ConstLabels: constLabels,
 	}, a.labels)
 
-	if err := a.registry.Register(gv); err != nil {
+	if err := a.shared.registry.Register(gv); err != nil {
 		// handle restart: reuse already-registered collector
 		existing, ok := err.(prometheus.AlreadyRegisteredError)
 		if ok == false {
@@ -98,7 +113,7 @@ func (a *topNActor) HandleMessage(from gen.PID, message any) error {
 
 	case gen.MessageDownPID:
 		// owner terminated, clean up
-		a.registry.Unregister(a.gaugeVec)
+		a.shared.registry.Unregister(a.gaugeVec)
 		return gen.TerminateReasonNormal
 	}
 
@@ -117,6 +132,6 @@ func (a *topNActor) Terminate(reason error) {
 	}
 	// abnormal termination: unregister to allow clean re-registration
 	if a.gaugeVec != nil {
-		a.registry.Unregister(a.gaugeVec)
+		a.shared.registry.Unregister(a.gaugeVec)
 	}
 }

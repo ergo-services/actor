@@ -15,21 +15,18 @@ func makeOwnerPID() gen.PID {
 	return gen.PID{Node: "test@localhost", ID: 9999, Creation: 1}
 }
 
-func spawnTopNActor(t *testing.T, name string, topN int, order TopNOrder, registry *prometheus.Registry) *unit.TestActor {
+func spawnTopNActor(t *testing.T, name string, topN int, order TopNOrder, shared *Shared) *unit.TestActor {
 	t.Helper()
-	owner := makeOwnerPID()
-	labels := []string{"pid", "name"}
-
-	ta, err := unit.Spawn(t, TopNActorFactory, unit.WithArgs(
-		name,
-		"test help",
-		labels,
-		topN,
-		order,
-		registry,
-		100*time.Millisecond,
-		owner,
-	))
+	ta, err := unit.Spawn(t, TopNActorFactory, unit.WithArgs(TopNActorOptions{
+		Name:     name,
+		Help:     "test help",
+		Labels:   []string{"pid", "name"},
+		TopN:     topN,
+		Order:    order,
+		Shared:   shared,
+		Interval: 100 * time.Millisecond,
+		Owner:    makeOwnerPID(),
+	}))
 	if err != nil {
 		t.Fatalf("failed to spawn topN actor: %v", err)
 	}
@@ -39,8 +36,8 @@ func spawnTopNActor(t *testing.T, name string, topN int, order TopNOrder, regist
 // --- Init tests ---
 
 func TestTopNActorInit(t *testing.T) {
-	registry := prometheus.NewRegistry()
-	ta := spawnTopNActor(t, "test_init_metric", 5, TopNMax, registry)
+	shared := NewShared()
+	ta := spawnTopNActor(t, "test_init_metric", 5, TopNMax, shared)
 
 	if ta.IsTerminated() {
 		t.Fatal("actor should not be terminated after init")
@@ -102,7 +99,7 @@ func TestTopNActorInitNoArgs(t *testing.T) {
 }
 
 func TestTopNActorInitAlreadyRegisteredGaugeVec(t *testing.T) {
-	registry := prometheus.NewRegistry()
+	shared := NewShared()
 
 	// pre-register a GaugeVec with the same name, help, and labels
 	// (Prometheus descriptor must match exactly for AlreadyRegisteredError)
@@ -111,10 +108,10 @@ func TestTopNActorInitAlreadyRegisteredGaugeVec(t *testing.T) {
 		Help:        "test help",
 		ConstLabels: prometheus.Labels{"node": "test@localhost"},
 	}, []string{"pid", "name"})
-	registry.MustRegister(gv)
+	shared.registry.MustRegister(gv)
 
 	// spawn actor -- should reuse existing collector
-	ta := spawnTopNActor(t, "test_preregistered", 5, TopNMax, registry)
+	ta := spawnTopNActor(t, "test_preregistered", 5, TopNMax, shared)
 	if ta.IsTerminated() {
 		t.Fatal("actor should handle already-registered GaugeVec gracefully")
 	}
@@ -123,8 +120,8 @@ func TestTopNActorInitAlreadyRegisteredGaugeVec(t *testing.T) {
 // --- HandleMessage tests ---
 
 func TestTopNActorObserve(t *testing.T) {
-	registry := prometheus.NewRegistry()
-	ta := spawnTopNActor(t, "test_observe", 3, TopNMax, registry)
+	shared := NewShared()
+	ta := spawnTopNActor(t, "test_observe", 3, TopNMax, shared)
 
 	sender := gen.PID{Node: "test@localhost", ID: 5000, Creation: 1}
 
@@ -140,7 +137,7 @@ func TestTopNActorObserve(t *testing.T) {
 	// flush and verify observations were actually stored
 	ta.SendMessage(sender, messageFlush{})
 
-	families, err := registry.Gather()
+	families, err := shared.registry.Gather()
 	if err != nil {
 		t.Fatalf("failed to gather: %v", err)
 	}
@@ -167,8 +164,8 @@ func TestTopNActorObserve(t *testing.T) {
 }
 
 func TestTopNActorObserveRespectTopN(t *testing.T) {
-	registry := prometheus.NewRegistry()
-	ta := spawnTopNActor(t, "test_observe_topn", 2, TopNMax, registry)
+	shared := NewShared()
+	ta := spawnTopNActor(t, "test_observe_topn", 2, TopNMax, shared)
 
 	sender := gen.PID{Node: "test@localhost", ID: 5000, Creation: 1}
 
@@ -186,7 +183,7 @@ func TestTopNActorObserveRespectTopN(t *testing.T) {
 	}
 
 	// verify only top-2 values are in the gauge
-	families, err := registry.Gather()
+	families, err := shared.registry.Gather()
 	if err != nil {
 		t.Fatalf("failed to gather: %v", err)
 	}
@@ -214,8 +211,8 @@ func TestTopNActorObserveRespectTopN(t *testing.T) {
 }
 
 func TestTopNActorFlush(t *testing.T) {
-	registry := prometheus.NewRegistry()
-	ta := spawnTopNActor(t, "test_flush", 5, TopNMax, registry)
+	shared := NewShared()
+	ta := spawnTopNActor(t, "test_flush", 5, TopNMax, shared)
 
 	sender := gen.PID{Node: "test@localhost", ID: 5000, Creation: 1}
 
@@ -230,7 +227,7 @@ func TestTopNActorFlush(t *testing.T) {
 	}
 
 	// verify metrics were written
-	families, err := registry.Gather()
+	families, err := shared.registry.Gather()
 	if err != nil {
 		t.Fatalf("failed to gather: %v", err)
 	}
@@ -250,8 +247,8 @@ func TestTopNActorFlush(t *testing.T) {
 }
 
 func TestTopNActorFlushReschedulesTimer(t *testing.T) {
-	registry := prometheus.NewRegistry()
-	ta := spawnTopNActor(t, "test_flush_timer", 5, TopNMax, registry)
+	shared := NewShared()
+	ta := spawnTopNActor(t, "test_flush_timer", 5, TopNMax, shared)
 
 	sender := gen.PID{Node: "test@localhost", ID: 5000, Creation: 1}
 
@@ -275,8 +272,8 @@ func TestTopNActorFlushReschedulesTimer(t *testing.T) {
 }
 
 func TestTopNActorFlushClearsHeap(t *testing.T) {
-	registry := prometheus.NewRegistry()
-	ta := spawnTopNActor(t, "test_flush_clear", 5, TopNMax, registry)
+	shared := NewShared()
+	ta := spawnTopNActor(t, "test_flush_clear", 5, TopNMax, shared)
 
 	sender := gen.PID{Node: "test@localhost", ID: 5000, Creation: 1}
 
@@ -289,7 +286,7 @@ func TestTopNActorFlushClearsHeap(t *testing.T) {
 	ta.SendMessage(sender, MessageTopNObserve{Value: 999, Labels: []string{"pid3", "c"}})
 	ta.SendMessage(sender, messageFlush{})
 
-	families, err := registry.Gather()
+	families, err := shared.registry.Gather()
 	if err != nil {
 		t.Fatalf("failed to gather: %v", err)
 	}
@@ -310,8 +307,8 @@ func TestTopNActorFlushClearsHeap(t *testing.T) {
 }
 
 func TestTopNActorMinOrder(t *testing.T) {
-	registry := prometheus.NewRegistry()
-	ta := spawnTopNActor(t, "test_min_order", 2, TopNMin, registry)
+	shared := NewShared()
+	ta := spawnTopNActor(t, "test_min_order", 2, TopNMin, shared)
 
 	sender := gen.PID{Node: "test@localhost", ID: 5000, Creation: 1}
 
@@ -321,7 +318,7 @@ func TestTopNActorMinOrder(t *testing.T) {
 	ta.SendMessage(sender, MessageTopNObserve{Value: 200, Labels: []string{"pid4", "d"}})
 	ta.SendMessage(sender, messageFlush{})
 
-	families, err := registry.Gather()
+	families, err := shared.registry.Gather()
 	if err != nil {
 		t.Fatalf("failed to gather: %v", err)
 	}
@@ -348,8 +345,8 @@ func TestTopNActorMinOrder(t *testing.T) {
 // --- Owner down / termination tests ---
 
 func TestTopNActorOwnerDown(t *testing.T) {
-	registry := prometheus.NewRegistry()
-	ta := spawnTopNActor(t, "test_owner_down", 5, TopNMax, registry)
+	shared := NewShared()
+	ta := spawnTopNActor(t, "test_owner_down", 5, TopNMax, shared)
 
 	owner := makeOwnerPID()
 
@@ -374,14 +371,14 @@ func TestTopNActorOwnerDown(t *testing.T) {
 		Help:        "test help",
 		ConstLabels: prometheus.Labels{"node": "test@localhost"},
 	}, []string{"pid", "name"})
-	if err := registry.Register(gv); err != nil {
+	if err := shared.registry.Register(gv); err != nil {
 		t.Fatalf("expected GaugeVec to be unregistered after owner down, got: %v", err)
 	}
 }
 
 func TestTopNActorOwnerDownAfterObservations(t *testing.T) {
-	registry := prometheus.NewRegistry()
-	ta := spawnTopNActor(t, "test_owner_down_obs", 5, TopNMax, registry)
+	shared := NewShared()
+	ta := spawnTopNActor(t, "test_owner_down_obs", 5, TopNMax, shared)
 
 	owner := makeOwnerPID()
 	sender := gen.PID{Node: "test@localhost", ID: 5000, Creation: 1}
@@ -404,8 +401,8 @@ func TestTopNActorOwnerDownAfterObservations(t *testing.T) {
 // --- HandleCall tests ---
 
 func TestTopNActorHandleCallDefault(t *testing.T) {
-	registry := prometheus.NewRegistry()
-	ta := spawnTopNActor(t, "test_call_default", 5, TopNMax, registry)
+	shared := NewShared()
+	ta := spawnTopNActor(t, "test_call_default", 5, TopNMax, shared)
 
 	caller := gen.PID{Node: "test@localhost", ID: 5000, Creation: 1}
 
@@ -421,8 +418,8 @@ func TestTopNActorHandleCallDefault(t *testing.T) {
 // --- Unrelated messages are ignored ---
 
 func TestTopNActorIgnoresUnknownMessages(t *testing.T) {
-	registry := prometheus.NewRegistry()
-	ta := spawnTopNActor(t, "test_unknown_msg", 5, TopNMax, registry)
+	shared := NewShared()
+	ta := spawnTopNActor(t, "test_unknown_msg", 5, TopNMax, shared)
 
 	sender := gen.PID{Node: "test@localhost", ID: 5000, Creation: 1}
 
@@ -438,8 +435,8 @@ func TestTopNActorIgnoresUnknownMessages(t *testing.T) {
 // --- Multiple flush cycles ---
 
 func TestTopNActorMultipleFlushCycles(t *testing.T) {
-	registry := prometheus.NewRegistry()
-	ta := spawnTopNActor(t, "test_multi_flush", 3, TopNMax, registry)
+	shared := NewShared()
+	ta := spawnTopNActor(t, "test_multi_flush", 3, TopNMax, shared)
 
 	sender := gen.PID{Node: "test@localhost", ID: 5000, Creation: 1}
 
@@ -448,7 +445,7 @@ func TestTopNActorMultipleFlushCycles(t *testing.T) {
 	ta.SendMessage(sender, MessageTopNObserve{Value: 20, Labels: []string{"b", "y"}})
 	ta.SendMessage(sender, messageFlush{})
 
-	families, _ := registry.Gather()
+	families, _ := shared.registry.Gather()
 	for _, mf := range families {
 		if mf.GetName() == "test_multi_flush" {
 			if len(mf.GetMetric()) != 2 {
@@ -461,7 +458,7 @@ func TestTopNActorMultipleFlushCycles(t *testing.T) {
 	ta.SendMessage(sender, MessageTopNObserve{Value: 100, Labels: []string{"c", "z"}})
 	ta.SendMessage(sender, messageFlush{})
 
-	families, _ = registry.Gather()
+	families, _ = shared.registry.Gather()
 	for _, mf := range families {
 		if mf.GetName() == "test_multi_flush" {
 			if len(mf.GetMetric()) != 1 {
@@ -476,7 +473,7 @@ func TestTopNActorMultipleFlushCycles(t *testing.T) {
 	// cycle 3: empty
 	ta.SendMessage(sender, messageFlush{})
 
-	families, _ = registry.Gather()
+	families, _ = shared.registry.Gather()
 	for _, mf := range families {
 		if mf.GetName() == "test_multi_flush" {
 			t.Fatalf("cycle 3: expected no metric family (all cleared), but got %d samples", len(mf.GetMetric()))
@@ -500,25 +497,29 @@ func TestTopNActorFactory(t *testing.T) {
 	}
 }
 
-// --- Separate registries ---
+// --- Separate shared instances ---
 
-func TestTopNActorSeparateRegistries(t *testing.T) {
-	registry1 := prometheus.NewRegistry()
-	registry2 := prometheus.NewRegistry()
+func TestTopNActorSeparateShared(t *testing.T) {
+	shared1 := NewShared()
+	shared2 := NewShared()
 
 	owner := makeOwnerPID()
 	labels := []string{"id"}
 
-	ta1, err := unit.Spawn(t, TopNActorFactory, unit.WithArgs(
-		"metric_a", "help a", labels, 3, TopNMax, registry1, 100*time.Millisecond, owner,
-	))
+	ta1, err := unit.Spawn(t, TopNActorFactory, unit.WithArgs(TopNActorOptions{
+		Name: "metric_a", Help: "help a", Labels: labels,
+		TopN: 3, Order: TopNMax, Shared: shared1,
+		Interval: 100 * time.Millisecond, Owner: owner,
+	}))
 	if err != nil {
 		t.Fatalf("failed to spawn ta1: %v", err)
 	}
 
-	ta2, err := unit.Spawn(t, TopNActorFactory, unit.WithArgs(
-		"metric_b", "help b", labels, 3, TopNMin, registry2, 100*time.Millisecond, owner,
-	))
+	ta2, err := unit.Spawn(t, TopNActorFactory, unit.WithArgs(TopNActorOptions{
+		Name: "metric_b", Help: "help b", Labels: labels,
+		TopN: 3, Order: TopNMin, Shared: shared2,
+		Interval: 100 * time.Millisecond, Owner: owner,
+	}))
 	if err != nil {
 		t.Fatalf("failed to spawn ta2: %v", err)
 	}
@@ -531,19 +532,19 @@ func TestTopNActorSeparateRegistries(t *testing.T) {
 	ta2.SendMessage(sender, MessageTopNObserve{Value: 25, Labels: []string{"y"}})
 	ta2.SendMessage(sender, messageFlush{})
 
-	// registry1 should only have metric_a
-	families1, _ := registry1.Gather()
+	// shared1 should only have metric_a
+	families1, _ := shared1.registry.Gather()
 	for _, mf := range families1 {
 		if mf.GetName() == "metric_b" {
-			t.Fatal("registry1 should not contain metric_b")
+			t.Fatal("shared1 should not contain metric_b")
 		}
 	}
 
-	// registry2 should only have metric_b
-	families2, _ := registry2.Gather()
+	// shared2 should only have metric_b
+	families2, _ := shared2.registry.Gather()
 	for _, mf := range families2 {
 		if mf.GetName() == "metric_a" {
-			t.Fatal("registry2 should not contain metric_a")
+			t.Fatal("shared2 should not contain metric_a")
 		}
 	}
 
@@ -555,8 +556,8 @@ func TestTopNActorSeparateRegistries(t *testing.T) {
 // --- High volume test ---
 
 func TestTopNActorHighVolume(t *testing.T) {
-	registry := prometheus.NewRegistry()
-	ta := spawnTopNActor(t, "test_high_volume", 10, TopNMax, registry)
+	shared := NewShared()
+	ta := spawnTopNActor(t, "test_high_volume", 10, TopNMax, shared)
 
 	sender := gen.PID{Node: "test@localhost", ID: 5000, Creation: 1}
 
@@ -573,7 +574,7 @@ func TestTopNActorHighVolume(t *testing.T) {
 		t.Fatal("actor should handle high volume without termination")
 	}
 
-	families, err := registry.Gather()
+	families, err := shared.registry.Gather()
 	if err != nil {
 		t.Fatalf("failed to gather: %v", err)
 	}
