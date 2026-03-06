@@ -2847,7 +2847,7 @@
           },
           "options": {
             "displayMode": "gradient",
-            "namePlacement": "top",
+            "namePlacement": "left",
             "orientation": "horizontal",
             "reduceOptions": {
               "calcs": [
@@ -3600,7 +3600,7 @@
           },
           "options": {
             "displayMode": "gradient",
-            "namePlacement": "top",
+            "namePlacement": "left",
             "orientation": "horizontal",
             "reduceOptions": {
               "calcs": [
