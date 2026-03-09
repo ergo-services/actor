@@ -2813,7 +2813,7 @@
           },
           "targets": [
             {
-              "expr": "ergo_process_init_time_max_seconds{node=~\"$node\"}",
+              "expr": "sort_desc(ergo_process_init_time_max_seconds{node=~\"$node\"})",
               "legendFormat": "{{node}}"
             }
           ],
