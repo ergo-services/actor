@@ -235,6 +235,17 @@ func (a *Actor) initializeErgoMetrics() error {
 	registerInternalGaugeVec(cm, a.registry, "ergo_remote_messages_out_total", "Total number of messages sent to remote node", nodeLabels, []string{"remote_node"})
 	registerInternalGaugeVec(cm, a.registry, "ergo_remote_bytes_in_total", "Total number of bytes received from remote node", nodeLabels, []string{"remote_node"})
 	registerInternalGaugeVec(cm, a.registry, "ergo_remote_bytes_out_total", "Total number of bytes sent to remote node", nodeLabels, []string{"remote_node"})
+	registerInternalGaugeVec(cm, a.registry, "ergo_remote_fragments_sent_total", "Total fragments sent to remote node", nodeLabels, []string{"remote_node"})
+	registerInternalGaugeVec(cm, a.registry, "ergo_remote_fragment_messages_sent_total", "Total fragmented messages sent to remote node", nodeLabels, []string{"remote_node"})
+	registerInternalGaugeVec(cm, a.registry, "ergo_remote_fragments_received_total", "Total fragments received from remote node", nodeLabels, []string{"remote_node"})
+	registerInternalGaugeVec(cm, a.registry, "ergo_remote_fragment_messages_received_total", "Total fragmented messages reassembled from remote node", nodeLabels, []string{"remote_node"})
+	registerInternalGaugeVec(cm, a.registry, "ergo_remote_fragment_timeouts_total", "Total fragment assembly timeouts for remote node", nodeLabels, []string{"remote_node"})
+	registerInternalGaugeVec(cm, a.registry, "ergo_remote_compressed_sent_total", "Total compressed messages sent to remote node", nodeLabels, []string{"remote_node"})
+	registerInternalGaugeVec(cm, a.registry, "ergo_remote_compressed_bytes_sent_total", "Total bytes after compression sent to remote node", nodeLabels, []string{"remote_node"})
+	registerInternalGaugeVec(cm, a.registry, "ergo_remote_compressed_orig_bytes_sent_total", "Total bytes before compression sent to remote node", nodeLabels, []string{"remote_node"})
+	registerInternalGaugeVec(cm, a.registry, "ergo_remote_decompressed_recv_total", "Total decompressed messages received from remote node", nodeLabels, []string{"remote_node"})
+	registerInternalGaugeVec(cm, a.registry, "ergo_remote_decompressed_bytes_recv_total", "Total bytes before decompression from remote node", nodeLabels, []string{"remote_node"})
+	registerInternalGaugeVec(cm, a.registry, "ergo_remote_decompressed_orig_recv_total", "Total bytes after decompression from remote node", nodeLabels, []string{"remote_node"})
 
 	// Network health metrics
 	registerInternalGauge(cm, a.registry, "ergo_connections_established_total", "Cumulative connections established", nodeLabels)
@@ -369,6 +380,17 @@ func (a *Actor) collectBaseMetrics() error {
 	remoteMsgOut := gaugeVecFromMap(cm, "ergo_remote_messages_out_total")
 	remoteBytIn := gaugeVecFromMap(cm, "ergo_remote_bytes_in_total")
 	remoteBytOut := gaugeVecFromMap(cm, "ergo_remote_bytes_out_total")
+	remoteFragSent := gaugeVecFromMap(cm, "ergo_remote_fragments_sent_total")
+	remoteFragMsgSent := gaugeVecFromMap(cm, "ergo_remote_fragment_messages_sent_total")
+	remoteFragRecv := gaugeVecFromMap(cm, "ergo_remote_fragments_received_total")
+	remoteFragMsgRecv := gaugeVecFromMap(cm, "ergo_remote_fragment_messages_received_total")
+	remoteFragTimeouts := gaugeVecFromMap(cm, "ergo_remote_fragment_timeouts_total")
+	remoteCompSent := gaugeVecFromMap(cm, "ergo_remote_compressed_sent_total")
+	remoteCompBytesSent := gaugeVecFromMap(cm, "ergo_remote_compressed_bytes_sent_total")
+	remoteCompOrigSent := gaugeVecFromMap(cm, "ergo_remote_compressed_orig_bytes_sent_total")
+	remoteDecompRecv := gaugeVecFromMap(cm, "ergo_remote_decompressed_recv_total")
+	remoteDecompBytesRecv := gaugeVecFromMap(cm, "ergo_remote_decompressed_bytes_recv_total")
+	remoteDecompOrigRecv := gaugeVecFromMap(cm, "ergo_remote_decompressed_orig_recv_total")
 
 	// Reset remote node metrics before updating
 	remoteUptime.Reset()
@@ -376,6 +398,17 @@ func (a *Actor) collectBaseMetrics() error {
 	remoteMsgOut.Reset()
 	remoteBytIn.Reset()
 	remoteBytOut.Reset()
+	remoteFragSent.Reset()
+	remoteFragMsgSent.Reset()
+	remoteFragRecv.Reset()
+	remoteFragMsgRecv.Reset()
+	remoteFragTimeouts.Reset()
+	remoteCompSent.Reset()
+	remoteCompBytesSent.Reset()
+	remoteCompOrigSent.Reset()
+	remoteDecompRecv.Reset()
+	remoteDecompBytesRecv.Reset()
+	remoteDecompOrigRecv.Reset()
 
 	// Update per-node metrics
 	for _, nodeName := range connectedNodes {
@@ -392,6 +425,17 @@ func (a *Actor) collectBaseMetrics() error {
 		remoteMsgOut.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.MessagesOut))
 		remoteBytIn.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.BytesIn))
 		remoteBytOut.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.BytesOut))
+		remoteFragSent.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.FragmentsSent))
+		remoteFragMsgSent.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.FragmentMessagesSent))
+		remoteFragRecv.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.FragmentsReceived))
+		remoteFragMsgRecv.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.FragmentMessagesRecv))
+		remoteFragTimeouts.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.FragmentTimeouts))
+		remoteCompSent.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.CompressedSent))
+		remoteCompBytesSent.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.CompressedBytesSent))
+		remoteCompOrigSent.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.CompressedOrigBytesSent))
+		remoteDecompRecv.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.DecompressedRecv))
+		remoteDecompBytesRecv.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.DecompressedBytesRecv))
+		remoteDecompOrigRecv.WithLabelValues(nodeNameStr).Set(float64(remoteInfo.DecompressedOrigRecv))
 	}
 
 	// Collect per-process metrics in a single pass
