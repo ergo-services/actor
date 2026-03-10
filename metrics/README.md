@@ -422,7 +422,17 @@ Requires `-tags=latency` build tag for mailbox latency data.
 
 The liveness score is computed as `RunningTime / (Uptime * MailboxLatency)`. A healthy process has high RunningTime (actively executing callbacks) relative to its uptime and latency. A process stuck in a blocking call has RunningTime frozen near zero while latency grows, producing a score near zero.
 
-The key insight: `RunningTime` measures only completed callback execution time. When a callback is blocked (mutex, channel, IO), RunningTime stops growing while Uptime and MailboxLatency keep increasing, driving the score down. This cleanly separates "overloaded but working" (RunningTime growing) from "stuck" (RunningTime frozen).
+Mailbox latency alone shows that messages are waiting, but not why. Two processes can have the same latency of 18 seconds for completely different reasons:
+
+| | Process 1 (overloaded) | Process 2 (stuck) |
+|---|---|---|
+| MailboxLatency | 18s | 18s |
+| RunningTime | 5000s (actively processing) | 82us (frozen) |
+| Liveness | 0.027 (healthy) | ~0 (blocked) |
+| Root cause | Can't keep up with message rate | Callback blocked on mutex/channel/IO |
+| Action | Scale out, add workers | Find and fix blocking call |
+
+`RunningTime` measures only completed callback execution time. When a callback is blocked, RunningTime stops growing while Uptime and MailboxLatency keep increasing, driving the score down. This separates "overloaded but working" from "stuck" -- latency alone cannot make this distinction.
 
 Processes are excluded when: `Uptime < 60s` (startup), `MessagesIn == 0` (idle), `MailboxLatency <= 0` (latency disabled or empty mailbox), `State == Zombee` (already detected by zombie metric).
 

@@ -819,15 +819,33 @@
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "Stuck (< 0.001)" },
+            "matcher": {
+              "id": "byName",
+              "options": "Stuck (< 0.001)"
+            },
             "properties": [
-              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "Suspect (< 0.01)" },
+            "matcher": {
+              "id": "byName",
+              "options": "Suspect (< 0.01)"
+            },
             "properties": [
-              { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
             ]
           }
         ]
@@ -1917,7 +1935,7 @@
         {
           "id": 85,
           "title": "Message Throughput (Cluster Total)",
-          "description": "Cluster-wide message throughput and wakeup rate. In (green): messages received. Out (blue): messages sent. Wakeups (purple dashed): process scheduling frequency. In a fully monitored cluster (metrics actor on every node), In and Out should be approximately balanced. A small imbalance is normal due to framework-internal messages (exit signals, down notifications) that increment In without a corresponding Out. Persistent significant imbalance indicates nodes without metrics collection: Out > In means messages are sent to unmonitored nodes, In > Out means unmonitored nodes are sending messages into the cluster. The gap between In and Wakeups shows drain effect: when they track together -- spare capacity, when In >> Wakeups -- processes batch under load.",
+          "description": "Cluster-wide message throughput and wakeup rate. In (green): total messages received by all processes. Out (blue): total messages sent by all processes. Wakeups (purple dashed): process scheduling frequency. In typically exceeds Out due to event fanout -- one publish delivers to many local subscribers, each counting as a separate received message. The gap between In and Wakeups shows drain effect: when they track together -- spare capacity, when In >> Wakeups -- processes batch messages under load.",
           "type": "timeseries",
           "gridPos": {
             "h": 8,
@@ -3461,7 +3479,7 @@
               "mode": "multi"
             }
           },
-          "description": "Cluster-wide inbound and outbound message rate. Provides a high-level view of cluster communication intensity. Sudden drops may indicate network partitions or node failures. See https://docs.ergo.services/networking/network-stack for the network architecture."
+          "description": "Cluster-wide inbound and outbound message rate across all node connections. In and Out lines may differ due to event fanout, burst timing, and asymmetric workloads -- this is normal. A sustained gap growing over time may indicate message loss. Sudden drops may indicate network partitions or node failures."
         },
         {
           "id": 31,
@@ -3685,24 +3703,51 @@
             },
             "overrides": [
               {
-                "matcher": { "id": "byName", "options": "Compression Ratio" },
+                "matcher": {
+                  "id": "byName",
+                  "options": "Compression Ratio"
+                },
                 "properties": [
-                  { "id": "unit", "value": "x" },
-                  { "id": "custom.axisPlacement", "value": "right" }
+                  {
+                    "id": "unit",
+                    "value": "x"
+                  },
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  }
                 ]
               },
               {
-                "matcher": { "id": "byName", "options": "Compressed msg/s" },
+                "matcher": {
+                  "id": "byName",
+                  "options": "Compressed msg/s"
+                },
                 "properties": [
-                  { "id": "unit", "value": "cps" },
-                  { "id": "custom.axisPlacement", "value": "left" }
+                  {
+                    "id": "unit",
+                    "value": "cps"
+                  },
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "left"
+                  }
                 ]
               },
               {
-                "matcher": { "id": "byName", "options": "% Messages Compressed" },
+                "matcher": {
+                  "id": "byName",
+                  "options": "% Messages Compressed"
+                },
                 "properties": [
-                  { "id": "unit", "value": "percent" },
-                  { "id": "custom.axisPlacement", "value": "right" }
+                  {
+                    "id": "unit",
+                    "value": "percent"
+                  },
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  }
                 ]
               }
             ]
