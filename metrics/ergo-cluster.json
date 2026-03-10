@@ -3529,14 +3529,14 @@
                 "matcher": { "id": "byName", "options": "Compression Ratio" },
                 "properties": [
                   { "id": "unit", "value": "x" },
-                  { "id": "custom.axisPlacement", "value": "left" }
+                  { "id": "custom.axisPlacement", "value": "right" }
                 ]
               },
               {
                 "matcher": { "id": "byName", "options": "Compressed msg/s" },
                 "properties": [
-                  { "id": "unit", "value": "ops" },
-                  { "id": "custom.axisPlacement", "value": "right" }
+                  { "id": "unit", "value": "cps" },
+                  { "id": "custom.axisPlacement", "value": "left" }
                 ]
               },
               {
@@ -3549,6 +3549,10 @@
             ]
           },
           "options": {
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            },
             "legend": {
               "displayMode": "table",
               "placement": "right"
@@ -3558,7 +3562,7 @@
         },
         {
           "id": 123,
-          "title": "Compression Savings per Node",
+          "title": "Compression Ratio per Node",
           "type": "timeseries",
           "gridPos": {
             "h": 8,
@@ -3568,17 +3572,18 @@
           },
           "targets": [
             {
-              "expr": "sum by (node) (rate(ergo_remote_compressed_orig_bytes_sent_total{node=~\"$node\"}[1m]) - rate(ergo_remote_compressed_bytes_sent_total{node=~\"$node\"}[1m]))",
-              "legendFormat": "{{node}} saved"
+              "expr": "sum by (node) (rate(ergo_remote_compressed_orig_bytes_sent_total{node=~\"$node\"}[1m])) / clamp_min(sum by (node) (rate(ergo_remote_compressed_bytes_sent_total{node=~\"$node\"}[1m])), 1)",
+              "legendFormat": "{{node}}"
             }
           ],
           "fieldConfig": {
             "defaults": {
-              "unit": "Bps",
+              "unit": "x",
               "custom": {
                 "lineInterpolation": "smooth",
                 "lineWidth": 1
-              }
+              },
+              "min": 0
             }
           },
           "options": {
@@ -3587,7 +3592,7 @@
               "placement": "right"
             }
           },
-          "description": "Bytes per second saved by compression on each node. Shows which nodes benefit most from compression in absolute terms. Zero means compression is disabled or messages are below the compression threshold."
+          "description": "Compression ratio per node (original / compressed). Ratio ~1.0 means data is incompressible -- compression wastes CPU, consider disabling. Ratio 2x+ means compression is effective. Compare across nodes to identify which connections benefit."
         },
         {
           "id": 120,
@@ -3623,7 +3628,7 @@
           ],
           "fieldConfig": {
             "defaults": {
-              "unit": "ops",
+              "unit": "cps",
               "custom": {
                 "lineInterpolation": "smooth",
                 "lineWidth": 1
@@ -3631,12 +3636,16 @@
             }
           },
           "options": {
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            },
             "legend": {
               "displayMode": "table",
               "placement": "right"
             }
           },
-          "description": "Cluster-wide fragment rate. Shows how many messages are being fragmented and reassembled. Assembly timeouts indicate incomplete deliveries (sender crash, connection drop). See https://docs.ergo.services/networking/network-stack#message-fragmentation for details."
+          "description": "Cluster-wide fragmentation rate. Values are counts per second: individual fragments sent/received, messages fragmented/reassembled, and assembly timeouts. Shows how many messages are being fragmented and reassembled. Assembly timeouts indicate incomplete deliveries (sender crash, connection drop). See https://docs.ergo.services/networking/network-stack#message-fragmentation for details."
         },
         {
           "id": 121,
@@ -3664,7 +3673,7 @@
           ],
           "fieldConfig": {
             "defaults": {
-              "unit": "ops",
+              "unit": "cps",
               "custom": {
                 "lineInterpolation": "smooth",
                 "lineWidth": 1
@@ -3677,7 +3686,7 @@
               "placement": "right"
             }
           },
-          "description": "Per-node fragmentation activity. Shows which nodes are sending or receiving fragmented messages. Timeouts on a specific node may indicate that node is losing connections mid-transfer."
+          "description": "Per-node fragmentation activity. Values are messages per second: how many messages were fragmented for sending, reassembled on receive, or timed out waiting for fragments. Shows which nodes are sending or receiving fragmented messages. Timeouts on a specific node may indicate that node is losing connections mid-transfer."
         },
         {
           "id": 119,
