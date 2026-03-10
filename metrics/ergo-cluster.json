@@ -149,7 +149,7 @@
           }
         }
       },
-      "description": "Processes with blocked callbacks (liveness score < 0.001). Indicates actors calling blocking operations (mutex, channel, HTTP) inside message handlers. Green when 0, red when 1 or more. Requires -tags=latency."
+      "description": "Processes with blocked callbacks (liveness score < 0.001). Indicates actors calling blocking operations (mutex, channel, IO, HTTP) inside message handlers. Green when 0, red when 1 or more. Requires -tags=latency."
     },
     {
       "id": 4,
@@ -789,7 +789,7 @@
     },
     {
       "id": 125,
-      "title": "Process Liveness (Bottom-N)",
+      "title": "Liveness Alerts (stuck callbacks)",
       "type": "timeseries",
       "gridPos": {
         "h": 8,
@@ -799,34 +799,53 @@
       },
       "targets": [
         {
-          "expr": "ergo_process_liveness_bottom{node=~\"$node\"}",
-          "legendFormat": "{{name}}{{pid}} ({{behavior}})"
+          "expr": "count(ergo_process_liveness_bottom{node=~\"$node\"} < 0.001) OR vector(0)",
+          "legendFormat": "Stuck (< 0.001)"
+        },
+        {
+          "expr": "count(ergo_process_liveness_bottom{node=~\"$node\"} < 0.01 and ergo_process_liveness_bottom{node=~\"$node\"} >= 0.001) OR vector(0)",
+          "legendFormat": "Suspect (< 0.01)"
         }
       ],
       "fieldConfig": {
         "defaults": {
+          "min": 0,
+          "decimals": 0,
           "custom": {
-            "lineInterpolation": "smooth",
-            "lineWidth": 1
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 20
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Stuck (< 0.001)" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }
+            ]
           },
-          "min": 0
-        }
+          {
+            "matcher": { "id": "byName", "options": "Suspect (< 0.01)" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }
+            ]
+          }
+        ]
       },
       "options": {
         "tooltip": {
-          "mode": "multi",
-          "sort": "asc"
+          "mode": "multi"
         },
         "legend": {
-          "displayMode": "table",
-          "placement": "right"
+          "displayMode": "list",
+          "placement": "bottom"
         }
       },
-      "description": "Bottom-N processes by liveness score over time. Liveness = Wakeups / (Uptime * max(MailboxLatency_sec, 1)). A dropping line means the process is becoming stuck (callback blocked). Score near zero = blocked callback (mutex, channel, HTTP call inside handler). Requires -tags=latency."
+      "description": "Number of processes with low liveness score over time. Red (score < 0.001): handler blocked on a synchronous operation (mutex, channel, IO), cannot proceed to the next message. Orange (score < 0.01): handler slowing down, latency building up. Both at zero = healthy. Requires -tags=latency."
     },
     {
       "id": 126,
-      "title": "Stuck Processes Detail",
+      "title": "Liveness Details (stuck callbacks)",
       "type": "table",
       "gridPos": {
         "h": 8,
@@ -883,35 +902,8 @@
           }
         }
       ],
-      "fieldConfig": {
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Liveness"
-            },
-            "properties": [
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    { "color": "red", "value": null },
-                    { "color": "orange", "value": 0.001 },
-                    { "color": "yellow", "value": 0.01 },
-                    { "color": "green", "value": 0.1 }
-                  ]
-                }
-              },
-              {
-                "id": "custom.displayMode",
-                "value": "color-background"
-              }
-            ]
-          }
-        ]
-      },
-      "description": "Bottom-N processes by liveness score. Red (< 0.001) = callback blocked. Orange (< 0.01) = suspect. Green (> 0.1) = healthy. Sorted ascending -- worst at top. Requires -tags=latency."
+      "fieldConfig": {},
+      "description": "Processes with the lowest liveness score. Score = RunningTime / (Uptime * MailboxLatency). When a handler is blocked, RunningTime stops growing while latency increases, driving the score down. High = healthy, near zero = stuck. Zombies excluded. Sorted ascending -- worst at top. Requires -tags=latency."
     },
     {
       "id": 70,

@@ -28,28 +28,22 @@ func (lm *livenessMetrics) begin() {
 }
 
 func (lm *livenessMetrics) observe(info gen.ProcessShortInfo, topN int) {
-	// only consider processes that have been alive long enough
 	if info.Uptime < 60 {
 		return
 	}
-
-	// only consider processes that received messages (not idle/internal)
 	if info.MessagesIn == 0 {
 		return
 	}
-
-	// only consider processes with latency data available
-	if info.MailboxLatency < 0 {
+	if info.MailboxLatency <= 0 {
+		return
+	}
+	if info.State == gen.ProcessStateZombee {
 		return
 	}
 
-	// liveness = Wakeups / (Uptime * max(MailboxLatency_sec, 1))
-	latencySec := float64(info.MailboxLatency) / 1e9
-	if latencySec < 1 {
-		latencySec = 1
-	}
-
-	liveness := float64(info.Wakeups) / (float64(info.Uptime) * latencySec)
+	// liveness = RunningTime / (Uptime * MailboxLatency)
+	// high = healthy (actively processing), near zero = handler blocked
+	liveness := float64(info.RunningTime) / (float64(info.Uptime) * float64(info.MailboxLatency))
 
 	labels := []string{
 		info.PID.String(),

@@ -420,18 +420,21 @@ Requires `-tags=latency` build tag for mailbox latency data.
 |--------|------|--------|-------------|
 | `ergo_process_liveness_bottom` | Gauge | pid, name, application, behavior | Bottom-N processes by liveness score (lowest = most likely stuck) |
 
-The liveness score is computed as `Wakeups / (Uptime * max(MailboxLatency_sec, 1))`. A healthy process wakes frequently and has low mailbox latency, producing a high score. A process stuck in a blocking call has very few wakeups and growing latency, producing a score near zero.
+The liveness score is computed as `RunningTime / (Uptime * MailboxLatency)`. A healthy process has high RunningTime (actively executing callbacks) relative to its uptime and latency. A process stuck in a blocking call has RunningTime frozen near zero while latency grows, producing a score near zero.
 
-Processes are only evaluated when `Uptime > 60s` (excluding startup), `MessagesIn > 0` (excluding idle), and `MailboxLatency >= 0` (latency tag enabled). The bottom-N selection surfaces the most stuck processes.
+The key insight: `RunningTime` measures only completed callback execution time. When a callback is blocked (mutex, channel, IO), RunningTime stops growing while Uptime and MailboxLatency keep increasing, driving the score down. This cleanly separates "overloaded but working" (RunningTime growing) from "stuck" (RunningTime frozen).
+
+Processes are excluded when: `Uptime < 60s` (startup), `MessagesIn == 0` (idle), `MailboxLatency <= 0` (latency disabled or empty mailbox), `State == Zombee` (already detected by zombie metric).
 
 Example values:
 
-| Process | Wakeups | Uptime | Latency | Liveness |
-|---------|---------|--------|---------|----------|
-| Stuck in blocking call | 2 | 113117s | 137.5s | 0.0000001 |
-| Idle (healthy) | 10 | 3600s | 0s | 0.003 |
-| Normal (healthy) | 1000 | 3600s | 0.01s | 0.28 |
-| Overloaded but alive | 50000 | 3600s | 1s | 13.9 |
+| Process | RunningTime | Uptime | Latency | Liveness |
+|---------|-------------|--------|---------|----------|
+| Stuck in blocking call | 82us | 113117s | 137.5s | ~0 |
+| Overloaded supervisor | 5000s | 10000s | 18.5s | 0.027 |
+| Normal (brief latency) | 1000s | 3600s | 0.1s | 2.78 |
+| Healthy (empty mailbox) | any | any | 0 | excluded |
+| Zombie | any | any | any | excluded |
 
 ## Observer Integration
 
