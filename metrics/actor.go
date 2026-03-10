@@ -67,6 +67,7 @@ type Actor struct {
 	throughput  throughputMetrics
 	inittime    initTimeMetrics
 	wakeups     wakeupsMetrics
+	liveness    livenessMetrics
 	event       eventMetrics
 
 	// Custom metrics storage (standalone mode; shared mode uses Shared.custom)
@@ -265,6 +266,7 @@ func (a *Actor) initializeErgoMetrics() error {
 	a.throughput.init(cm, a.registry, nodeLabels)
 	a.inittime.init(cm, a.registry, nodeLabels)
 	a.wakeups.init(cm, a.registry, nodeLabels)
+	a.liveness.init(cm, a.registry, nodeLabels)
 	a.event.init(cm, a.registry, nodeLabels)
 
 	// Process aggregate metrics
@@ -445,6 +447,7 @@ func (a *Actor) collectBaseMetrics() error {
 	a.throughput.begin()
 	a.inittime.begin()
 	a.wakeups.begin()
+	a.liveness.begin()
 
 	var totalMessagesIn uint64
 	var totalMessagesOut uint64
@@ -478,6 +481,9 @@ func (a *Actor) collectBaseMetrics() error {
 		// Process wakeups metrics
 		a.wakeups.observe(info, topN)
 
+		// Process liveness metrics
+		a.liveness.observe(info, topN)
+
 		return true
 	})
 
@@ -487,6 +493,7 @@ func (a *Actor) collectBaseMetrics() error {
 	a.throughput.flush()
 	a.inittime.flush()
 	a.wakeups.flush()
+	a.liveness.flush()
 
 	// Collect event metrics
 	a.event.begin()

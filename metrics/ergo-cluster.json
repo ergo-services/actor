@@ -75,7 +75,7 @@
       "type": "stat",
       "gridPos": {
         "h": 4,
-        "w": 4,
+        "w": 2,
         "x": 8,
         "y": 0
       },
@@ -109,6 +109,47 @@
         }
       },
       "description": "Zombie processes -- terminated abnormally and not properly cleaned up. Non-zero value requires investigation. Green when 0, red when 1 or more."
+    },
+    {
+      "id": 124,
+      "title": "Stuck",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 2,
+        "x": 10,
+        "y": 0
+      },
+      "targets": [
+        {
+          "expr": "count(ergo_process_liveness_bottom{node=~\"$node\"} < 0.001) OR vector(0)",
+          "legendFormat": "Stuck"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      "description": "Processes with blocked callbacks (liveness score < 0.001). Indicates actors calling blocking operations (mutex, channel, HTTP) inside message handlers. Green when 0, red when 1 or more. Requires -tags=latency."
     },
     {
       "id": 4,
@@ -747,6 +788,132 @@
       "description": "Top-N processes by mailbox latency across the cluster, sorted descending. Directly answers which process is the bottleneck. Columns include Application, Behavior, and Name so you can identify the actor type. Requires -tags=latency."
     },
     {
+      "id": 125,
+      "title": "Process Liveness (Bottom-N)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 25
+      },
+      "targets": [
+        {
+          "expr": "ergo_process_liveness_bottom{node=~\"$node\"}",
+          "legendFormat": "{{name}}{{pid}} ({{behavior}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineInterpolation": "smooth",
+            "lineWidth": 1
+          },
+          "min": 0
+        }
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "asc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        }
+      },
+      "description": "Bottom-N processes by liveness score over time. Liveness = Wakeups / (Uptime * max(MailboxLatency_sec, 1)). A dropping line means the process is becoming stuck (callback blocked). Score near zero = blocked callback (mutex, channel, HTTP call inside handler). Requires -tags=latency."
+    },
+    {
+      "id": 126,
+      "title": "Stuck Processes Detail",
+      "type": "table",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 25
+      },
+      "targets": [
+        {
+          "expr": "ergo_process_liveness_bottom{node=~\"$node\"}",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "endpoint": true,
+              "job": true,
+              "prometheus": true
+            },
+            "indexByName": {
+              "application": 0,
+              "behavior": 1,
+              "name": 2,
+              "pid": 3,
+              "node": 4,
+              "Value": 5
+            },
+            "renameByName": {
+              "application": "Application",
+              "behavior": "Behavior",
+              "name": "Name",
+              "pid": "PID",
+              "node": "Node",
+              "Value": "Liveness"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Liveness",
+                "desc": false
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Liveness"
+            },
+            "properties": [
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "red", "value": null },
+                    { "color": "orange", "value": 0.001 },
+                    { "color": "yellow", "value": 0.01 },
+                    { "color": "green", "value": 0.1 }
+                  ]
+                }
+              },
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              }
+            ]
+          }
+        ]
+      },
+      "description": "Bottom-N processes by liveness score. Red (< 0.001) = callback blocked. Orange (< 0.01) = suspect. Green (> 0.1) = healthy. Sorted ascending -- worst at top. Requires -tags=latency."
+    },
+    {
       "id": 70,
       "type": "row",
       "title": "Mailbox Depth",
@@ -755,7 +922,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 25
+        "y": 33
       }
     },
     {
@@ -766,7 +933,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 26
+        "y": 34
       },
       "targets": [
         {
@@ -805,7 +972,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 26
+        "y": 34
       },
       "targets": [
         {
@@ -1032,7 +1199,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 34
+        "y": 42
       },
       "targets": [
         {
@@ -1102,7 +1269,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 42
+        "y": 50
       },
       "panels": [
         {
@@ -1752,7 +1919,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 43
+        "y": 51
       },
       "panels": [
         {
@@ -2646,7 +2813,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 43
+        "y": 52
       },
       "panels": [
         {
@@ -2945,7 +3112,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 44
+        "y": 53
       },
       "panels": [
         {
@@ -3097,7 +3264,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 45
+        "y": 54
       },
       "panels": [
         {
@@ -3260,7 +3427,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 45
+        "y": 55
       },
       "panels": [
         {

@@ -255,6 +255,17 @@ When the process that registered a top-N metric terminates, the actor automatica
 | `ergo_remote_messages_out_total` | Gauge | remote_node | Messages sent to node |
 | `ergo_remote_bytes_in_total` | Gauge | remote_node | Bytes received from node |
 | `ergo_remote_bytes_out_total` | Gauge | remote_node | Bytes sent to node |
+| `ergo_remote_fragments_sent_total` | Gauge | remote_node | Total fragments sent to node |
+| `ergo_remote_fragment_messages_sent_total` | Gauge | remote_node | Total fragmented messages sent to node |
+| `ergo_remote_fragments_received_total` | Gauge | remote_node | Total fragments received from node |
+| `ergo_remote_fragment_messages_received_total` | Gauge | remote_node | Total fragmented messages reassembled from node |
+| `ergo_remote_fragment_timeouts_total` | Gauge | remote_node | Total fragment assembly timeouts for node |
+| `ergo_remote_compressed_sent_total` | Gauge | remote_node | Total compressed messages sent to node |
+| `ergo_remote_compressed_bytes_sent_total` | Gauge | remote_node | Total bytes after compression sent to node |
+| `ergo_remote_compressed_orig_bytes_sent_total` | Gauge | remote_node | Total bytes before compression sent to node |
+| `ergo_remote_decompressed_recv_total` | Gauge | remote_node | Total decompressed messages received from node |
+| `ergo_remote_decompressed_bytes_recv_total` | Gauge | remote_node | Total bytes before decompression from node |
+| `ergo_remote_decompressed_orig_recv_total` | Gauge | remote_node | Total bytes after decompression from node |
 
 ### Mailbox Latency Metrics
 
@@ -399,6 +410,29 @@ No build tags required. Wakeups and drains metrics are always active.
 
 On the dashboard, the Throughput panels show wakeup rate as a third line alongside message in/out rates -- the visual gap between message rate and wakeup rate represents the drain effect. Drains per Node timeseries shows per-node drain ratio over time. Top Processes by Drains table identifies specific actors with the highest drain.
 
+### Process Liveness Metrics
+
+The metrics actor computes a liveness score for each process that detects blocked callbacks -- a common mistake where actors call blocking operations (mutexes, channels, HTTP calls, rate limiters) inside their message handlers. A blocked callback prevents the process from sleeping and processing new messages, causing the mailbox to grow indefinitely.
+
+Requires `-tags=latency` build tag for mailbox latency data.
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `ergo_process_liveness_bottom` | Gauge | pid, name, application, behavior | Bottom-N processes by liveness score (lowest = most likely stuck) |
+
+The liveness score is computed as `Wakeups / (Uptime * max(MailboxLatency_sec, 1))`. A healthy process wakes frequently and has low mailbox latency, producing a high score. A process stuck in a blocking call has very few wakeups and growing latency, producing a score near zero.
+
+Processes are only evaluated when `Uptime > 60s` (excluding startup), `MessagesIn > 0` (excluding idle), and `MailboxLatency >= 0` (latency tag enabled). The bottom-N selection surfaces the most stuck processes.
+
+Example values:
+
+| Process | Wakeups | Uptime | Latency | Liveness |
+|---------|---------|--------|---------|----------|
+| Stuck in blocking call | 2 | 113117s | 137.5s | 0.0000001 |
+| Idle (healthy) | 10 | 3600s | 0s | 0.003 |
+| Normal (healthy) | 1000 | 3600s | 0.01s | 0.28 |
+| Overloaded but alive | 50000 | 3600s | 1s | 13.9 |
+
 ## Observer Integration
 
 The metrics actor provides inspection data in the Observer UI: total metric count, HTTP endpoint, collection interval, custom metric count, and current values for all registered metrics.
@@ -470,7 +504,7 @@ The dashboard includes a `$node` variable dropdown at the top. It allows selecti
 
 **Logging** (collapsed) -- log message rate by level. Spikes in warning/error indicate issues.
 
-**Network** (collapsed) -- inter-node communication: message and byte rates (cluster total, per node, per node pair), connectivity strength (full mesh percentage as stat and per-node bar gauge), and connection events (established/lost/handshake errors).
+**Network** (collapsed) -- inter-node communication: message and byte rates (cluster total, per node, per node pair), compression overview (ratio, rate, percentage of compressed messages) and per-node compression ratio, fragmentation rates (cluster total and per node), connectivity strength (full mesh percentage as stat and per-node bar gauge), and connection events (established/lost/handshake errors).
 
 ## Best Practices
 
