@@ -1,7 +1,6 @@
 package statemachine
 
 import (
-	"context"
 	"fmt"
 	"reflect"
 	"runtime"
@@ -99,10 +98,10 @@ type StateTimeout struct {
 func (StateTimeout) isAction() {}
 
 type ActiveStateTimeout struct {
-	state   gen.Atom
-	timeout StateTimeout
-	ctx     context.Context
-	cancel  context.CancelFunc
+	state     gen.Atom
+	timeout   StateTimeout
+	cancel    func()
+	cancelled bool
 }
 
 type GenericTimeout struct {
@@ -114,9 +113,9 @@ type GenericTimeout struct {
 func (GenericTimeout) isAction() {}
 
 type ActiveGenericTimeout struct {
-	timeout GenericTimeout
-	ctx     context.Context
-	cancel  context.CancelFunc
+	timeout   GenericTimeout
+	cancel    func()
+	cancelled bool
 }
 
 type MessageTimeout struct {
@@ -127,9 +126,9 @@ type MessageTimeout struct {
 func (MessageTimeout) isAction() {}
 
 type ActiveMessageTimeout struct {
-	timeout MessageTimeout
-	ctx     context.Context
-	cancel  context.CancelFunc
+	timeout   MessageTimeout
+	cancel    func()
+	cancelled bool
 }
 
 // Type alias for MessageHandler callbacks.
@@ -231,6 +230,7 @@ func (s *StateMachine[D]) SetCurrentState(state gen.Atom) error {
 		if s.hasActiveStateTimeout() && s.stateTimeout.state != state {
 			s.Log().Debug("StateMachine: canceling state timeout for state %s", state)
 			s.stateTimeout.cancel()
+			s.stateTimeout.cancelled = true
 		}
 		// Execute state enter callback until no new transition is triggered.
 		if s.stateEnterCallback != nil {
@@ -254,16 +254,16 @@ func (s *StateMachine[D]) SetData(data D) {
 }
 
 func (s *StateMachine[D]) hasActiveStateTimeout() bool {
-	return s.stateTimeout != nil && s.stateTimeout.ctx.Err() == nil
+	return s.stateTimeout != nil && !s.stateTimeout.cancelled
 }
 
 func (s *StateMachine[D]) hasActiveMessageTimeout() bool {
-	return s.messageTimeout != nil && s.messageTimeout.ctx.Err() == nil
+	return s.messageTimeout != nil && !s.messageTimeout.cancelled
 }
 
 func (s *StateMachine[D]) hasActiveGenericTimeout(name gen.Atom) bool {
 	if timeout, exists := s.genericTimeouts[name]; exists {
-		return timeout.ctx.Err() == nil
+		return !timeout.cancelled
 	}
 	return false
 }
@@ -378,6 +378,7 @@ func (s *StateMachine[D]) ProcessRun() (rr error) {
 		// Any message should cancel the active message timeout
 		if s.hasActiveMessageTimeout() {
 			s.messageTimeout.cancel()
+			s.messageTimeout.cancelled = true
 		}
 
 		switch message.Type {
@@ -499,81 +500,50 @@ func (s *StateMachine[D]) ProcessActions(actions []Action, state gen.Atom) {
 		case StateTimeout:
 			if s.hasActiveStateTimeout() {
 				s.stateTimeout.cancel()
+				s.stateTimeout.cancelled = true
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), action.Duration)
+			// Use SendAfter instead of manual goroutine + Send.
+			// In Ergo v3.2.0+, proc.Send() returns "not allowed" when called from
+			// a goroutine while the process is in Sleep state. SendAfter properly
+			// handles this by using the node's routing methods directly.
+			cancelFunc, err := s.SendAfter(s.PID(), action.Message, action.Duration)
+			if err != nil {
+				s.Log().Error("StateMachine: failed to schedule state timeout: %v", err)
+				continue
+			}
 			s.stateTimeout = &ActiveStateTimeout{
 				state:   state,
 				timeout: action,
-				ctx:     ctx,
-				cancel:  cancel,
+				cancel:  func() { cancelFunc() },
 			}
-			go startStateTimeout(ctx, state, action.Message, s)
 		case GenericTimeout:
 			if s.hasActiveGenericTimeout(action.Name) {
 				s.genericTimeouts[action.Name].cancel()
+				s.genericTimeouts[action.Name].cancelled = true
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), action.Duration)
+			// Use SendAfter instead of manual goroutine + Send.
+			cancelFunc, err := s.SendAfter(s.PID(), action.Message, action.Duration)
+			if err != nil {
+				s.Log().Error("StateMachine: failed to schedule generic timeout %s: %v", action.Name, err)
+				continue
+			}
 			s.genericTimeouts[action.Name] = &ActiveGenericTimeout{
 				timeout: action,
-				ctx:     ctx,
-				cancel:  cancel,
+				cancel:  func() { cancelFunc() },
 			}
-			go startGenericTimeout(ctx, action.Name, action.Message, s)
 		case MessageTimeout:
-			ctx, cancel := context.WithTimeout(context.Background(), action.Duration)
+			// Use SendAfter instead of manual goroutine + Send.
+			cancelFunc, err := s.SendAfter(s.PID(), action.Message, action.Duration)
+			if err != nil {
+				s.Log().Error("StateMachine: failed to schedule message timeout: %v", err)
+				continue
+			}
 			s.messageTimeout = &ActiveMessageTimeout{
 				timeout: action,
-				ctx:     ctx,
-				cancel:  cancel,
+				cancel:  func() { cancelFunc() },
 			}
-			go startMessageTimeout(ctx, action.Message, s)
 		default:
 			panic("unsupported action")
-		}
-	}
-}
-
-func startStateTimeout(ctx context.Context, state gen.Atom, message any, proc gen.Process) {
-	select {
-	case <-ctx.Done():
-		switch ctx.Err() {
-		case context.DeadlineExceeded:
-			proc.Log().Debug("StateMachine: state timeout for state %s timed out", state)
-			proc.Send(proc.PID(), message)
-			return
-		case context.Canceled:
-			proc.Log().Debug("StateMachine: state timeout for state %s canceled", state)
-			return
-		}
-	}
-}
-
-func startGenericTimeout(ctx context.Context, name gen.Atom, message any, proc gen.Process) {
-	select {
-	case <-ctx.Done():
-		switch ctx.Err() {
-		case context.DeadlineExceeded:
-			proc.Log().Debug("StateMachine: generic timeout %s timed out", name)
-			proc.Send(proc.PID(), message)
-			return
-		case context.Canceled:
-			proc.Log().Debug("StateMachine: generic timeout %s canceled", name)
-			return
-		}
-	}
-}
-
-func startMessageTimeout(ctx context.Context, message any, proc gen.Process) {
-	select {
-	case <-ctx.Done():
-		switch ctx.Err() {
-		case context.DeadlineExceeded:
-			proc.Log().Debug("StateMachine: message timeout timed out")
-			proc.Send(proc.PID(), message)
-			return
-		case context.Canceled:
-			proc.Log().Debug("StateMachine: message timeout canceled")
-			return
 		}
 	}
 }
