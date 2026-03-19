@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"ergo.services/ergo/gen"
@@ -79,6 +80,10 @@ type StateMachine[D any] struct {
 	// Pointer to the most recently configured state timeout.
 	stateTimeout *ActiveStateTimeout
 
+	// Monotonic generation for state timeouts so stale timeout messages can be
+	// recognized and dropped after a state transition.
+	stateTimeoutGeneration uint64
+
 	// Pointer to the most recently configured message timeout.
 	messageTimeout *ActiveMessageTimeout
 
@@ -98,10 +103,17 @@ type StateTimeout struct {
 func (StateTimeout) isAction() {}
 
 type ActiveStateTimeout struct {
-	state     gen.Atom
-	timeout   StateTimeout
-	cancel    func()
-	cancelled bool
+	state      gen.Atom
+	timeout    StateTimeout
+	generation uint64
+	cancel     func()
+	cancelled  bool
+}
+
+type stateTimeoutMessage struct {
+	state      gen.Atom
+	generation uint64
+	payload    any
 }
 
 type GenericTimeout struct {
@@ -228,7 +240,7 @@ func (s *StateMachine[D]) SetCurrentState(state gen.Atom) error {
 		// touch it. Otherwise we should cancel the active state timeout if there
 		// is one.
 		if s.hasActiveStateTimeout() && s.stateTimeout.state != state {
-			s.Log().Debug("StateMachine: canceling state timeout for state %s", state)
+			s.Log().Warning("StateMachine: canceling state timeout due to state transition", "fromState", oldState, "toState", state, "timeoutState", s.stateTimeout.state, "timeoutMessage", reflect.TypeOf(s.stateTimeout.timeout.Message).String())
 			s.stateTimeout.cancel()
 			s.stateTimeout.cancelled = true
 		}
@@ -383,6 +395,17 @@ func (s *StateMachine[D]) ProcessRun() (rr error) {
 
 		switch message.Type {
 		case gen.MailboxMessageTypeRegular:
+			if timeoutMsg, ok := message.Message.(stateTimeoutMessage); ok {
+				if !s.hasActiveStateTimeout() {
+					s.Log().Warning("StateMachine: dropping stale state timeout without active timeout", "messageState", timeoutMsg.state, "messageGeneration", timeoutMsg.generation, "currentState", s.currentState)
+					return nil
+				}
+				if s.stateTimeout.generation != timeoutMsg.generation || s.stateTimeout.state != timeoutMsg.state {
+					s.Log().Warning("StateMachine: dropping stale state timeout after state transition", "messageState", timeoutMsg.state, "messageGeneration", timeoutMsg.generation, "currentState", s.currentState, "activeTimeoutState", s.stateTimeout.state, "activeTimeoutGeneration", s.stateTimeout.generation, "activeTimeoutCancelled", s.stateTimeout.cancelled)
+					return nil
+				}
+				message.Message = timeoutMsg.payload
+			}
 			switch message.Message.(type) {
 			case startMonitoringEvents:
 				// start monitoring
@@ -399,6 +422,17 @@ func (s *StateMachine[D]) ProcessRun() (rr error) {
 				messageType := reflect.TypeOf(message.Message).String()
 				handler, ok := s.lookupMessageHandler(messageType)
 				if ok == false {
+					activeTimeoutState := gen.Atom("")
+					activeTimeoutMessage := ""
+					activeTimeoutCancelled := false
+					if s.stateTimeout != nil {
+						activeTimeoutState = s.stateTimeout.state
+						activeTimeoutCancelled = s.stateTimeout.cancelled
+						if s.stateTimeout.timeout.Message != nil {
+							activeTimeoutMessage = reflect.TypeOf(s.stateTimeout.timeout.Message).String()
+						}
+					}
+					s.Log().Error("StateMachine: no handler for message", "messageType", messageType, "currentState", s.currentState, "activeTimeoutState", activeTimeoutState, "activeTimeoutMessage", activeTimeoutMessage, "activeTimeoutCancelled", activeTimeoutCancelled)
 					return fmt.Errorf("No handler for message %s in state %s", messageType, s.currentState)
 				}
 				return s.invokeMessageHandler(handler, message)
@@ -499,6 +533,7 @@ func (s *StateMachine[D]) ProcessActions(actions []Action, state gen.Atom) {
 		switch action := action.(type) {
 		case StateTimeout:
 			if s.hasActiveStateTimeout() {
+				s.Log().Warning("StateMachine: replacing active state timeout", "currentState", s.currentState, "oldTimeoutState", s.stateTimeout.state, "oldTimeoutMessage", reflect.TypeOf(s.stateTimeout.timeout.Message).String(), "newTimeoutMessage", reflect.TypeOf(action.Message).String())
 				s.stateTimeout.cancel()
 				s.stateTimeout.cancelled = true
 			}
@@ -506,16 +541,20 @@ func (s *StateMachine[D]) ProcessActions(actions []Action, state gen.Atom) {
 			// In Ergo v3.2.0+, proc.Send() returns "not allowed" when called from
 			// a goroutine while the process is in Sleep state. SendAfter properly
 			// handles this by using the node's routing methods directly.
-			cancelFunc, err := s.SendAfter(s.PID(), action.Message, action.Duration)
+			generation := atomic.AddUint64(&s.stateTimeoutGeneration, 1)
+			wrapped := stateTimeoutMessage{state: state, generation: generation, payload: action.Message}
+			cancelFunc, err := s.SendAfter(s.PID(), wrapped, action.Duration)
 			if err != nil {
 				s.Log().Error("StateMachine: failed to schedule state timeout: %v", err)
 				continue
 			}
 			s.stateTimeout = &ActiveStateTimeout{
-				state:   state,
-				timeout: action,
-				cancel:  func() { cancelFunc() },
+				state:      state,
+				timeout:    action,
+				generation: generation,
+				cancel:     func() { cancelFunc() },
 			}
+			s.Log().Warning("StateMachine: scheduled state timeout", "state", state, "message", reflect.TypeOf(action.Message).String(), "duration", action.Duration)
 		case GenericTimeout:
 			if s.hasActiveGenericTimeout(action.Name) {
 				s.genericTimeouts[action.Name].cancel()
