@@ -19,8 +19,8 @@ type Options struct {
 
 	// Shared enables sharing the prometheus registry and custom metrics storage
 	// across multiple metrics actor instances.
-	// Primary actor: set Shared + Port (or Mux) -- handles base metrics + HTTP + custom metrics.
-	// Pool workers: set Shared only -- handle custom metrics only.
+	// Primary actor: set Shared + Port (or Mux); handles base metrics + HTTP + custom metrics.
+	// Pool workers: set Shared only; handle custom metrics only.
 	// See NewShared().
 	Shared *Shared
 }

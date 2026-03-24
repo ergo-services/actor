@@ -127,7 +127,7 @@ func (a *topNActor) HandleCall(from gen.PID, ref gen.Ref, request any) (any, err
 func (a *topNActor) Terminate(reason error) {
 	if reason == gen.TerminateReasonNormal || reason == gen.TerminateReasonShutdown {
 		// already unregistered in HandleMessage for owner-down,
-		// or shutting down gracefully -- leave gauge for restart reuse
+		// or shutting down gracefully; leave gauge for restart reuse
 		return
 	}
 	// abnormal termination: unregister to allow clean re-registration
