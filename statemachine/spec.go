@@ -41,13 +41,13 @@ Example:
 		otherState = gen.Atom("other")
 	)
 
-	spec := statrmachine.NewStateMachineSpec(
+	spec := statemachine.NewStateMachineSpec(
 		initialState,
-		statrmachine.WithStateEnterCallback(onEnterNewState),
-		statrmachine.WithStateMessageHandler(initialState, onSomeMessage),
-		statrmachine.WithStateMessageHandler(initialState, onAnotherMessage),
+		statemachine.WithStateEnterCallback(onEnterNewState),
+		statemachine.WithStateMessageHandler(initialState, onSomeMessage),
+		statemachine.WithStateMessageHandler(initialState, onAnotherMessage),
 		...
-		statrmachine.WithStateMessageHandler(anotherState, ...),
+		statemachine.WithStateMessageHandler(anotherState, ...),
 	)
 */
 func NewStateMachineSpec[D any](initialState gen.Atom, options ...Option[D]) StateMachineSpec[D] {

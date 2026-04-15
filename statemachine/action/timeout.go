@@ -6,13 +6,6 @@ import (
 	"ergo.services/ergo/gen"
 )
 
-// Timeout action interface helps to distinguish all Timeout actions.
-// As of now, there are three timeout actions: [StateTimeout], [MessageTimeout] and
-// [GenericTimeout].
-type Timeout interface {
-	TimerName() gen.Atom
-}
-
 // [StateTimeout] defines how long to wait in the current state.
 // It is cancelled if statemachine change it's state before Duraion, otherwise Message
 // will be sent to itself.
@@ -25,8 +18,7 @@ type StateTimeout struct {
 	Message  any
 }
 
-func (StateTimeout) TimerName() gen.Atom { return "state" }
-func (StateTimeout) isAction()           {}
+func (StateTimeout) isAction() {}
 
 // [MessageTimeout] defines how long to wait for event.
 // It is cancelled if any event arrives before Duraion, otherwise Message
@@ -40,8 +32,7 @@ type MessageTimeout struct {
 	Message  any
 }
 
-func (MessageTimeout) TimerName() gen.Atom { return "message" }
-func (MessageTimeout) isAction()           {}
+func (MessageTimeout) isAction() {}
 
 // [GenericTimeout] defines how  long to wait for a named time-out event.
 // When timer expires,  Message will be sent to the statemachine.
@@ -55,5 +46,4 @@ type GenericTimeout struct {
 	Message  any
 }
 
-func (gt GenericTimeout) TimerName() gen.Atom { return gt.Name }
-func (GenericTimeout) isAction()              {}
+func (GenericTimeout) isAction() {}

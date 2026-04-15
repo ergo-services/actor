@@ -33,9 +33,9 @@ Quick glance at a statemachine creation:
 	func (s *YourStatemachine) Init(args ...any) (spec statemachine.StateMachineSpec[yourFsmData], err error) {
 	  spec:= statemachine.NewStateMachineSpec(
 	    initialState,
-	    statrmachine.WithStateEnterCallback(...),
-	    statrmachine.WithStateMessageHandler(initialState, ...),
-	    statrmachine.WithStateMessageHandler(otherState, ...),
+	    statemachine.WithStateEnterCallback(...),
+	    statemachine.WithStateMessageHandler(initialState, ...),
+	    statemachine.WithStateMessageHandler(otherState, ...),
 	  )
 
 	  return spec, nil
