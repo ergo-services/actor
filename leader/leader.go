@@ -376,6 +376,9 @@ func (l *Actor) BroadcastBootstrap(message any) {
 // Join adds a peer to the cluster
 // Use this to manually add known peers or for dynamic cluster growth
 func (l *Actor) Join(peer gen.ProcessID) {
+	if peer.Node == l.Node().Name() && peer.Name == l.Name() {
+		return
+	}
 	l.Send(peer, msgVote{
 		ClusterID: l.clusterID,
 		Term:      l.term,
@@ -506,6 +509,10 @@ func (l *Actor) handleVoteReply(from gen.PID, msg msgVoteReply) error {
 	}
 
 	if l.votedFor != l.PID() {
+		return nil
+	}
+
+	if l.votesReceived == nil {
 		return nil
 	}
 

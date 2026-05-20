@@ -1,6 +1,6 @@
 module ergo.services/actor/metrics/example
 
-go 1.20
+go 1.21
 
 require (
 	ergo.services/actor/metrics v0.0.0

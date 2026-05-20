@@ -1,6 +1,6 @@
 module ergo.services/actor/health/example
 
-go 1.20
+go 1.21
 
 require (
 	ergo.services/actor/health v0.0.0
