@@ -5,7 +5,7 @@ go 1.21
 require (
 	ergo.services/actor/metrics v0.0.0
 	ergo.services/application/observer v0.0.0-20250927194435-52bffba635a1
-	ergo.services/ergo v1.999.321-0.20260225222959-cb4e7499386a
+	ergo.services/ergo v1.999.321-0.20260521070644-eb451aa1e067
 	github.com/prometheus/client_golang v1.20.5
 )
 
