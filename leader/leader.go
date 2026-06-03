@@ -247,6 +247,10 @@ func (l *Actor) ProcessTerminate(reason error) {
 	l.behavior.Terminate(reason)
 }
 
+func (l *Actor) ProcessKind() gen.ProcessKind {
+	return gen.ProcessKindFollower
+}
+
 func (l *Actor) handleMessage(from gen.PID, message any) error {
 	switch msg := message.(type) {
 	case gen.MessageDownPID:
@@ -396,6 +400,7 @@ func (l *Actor) becomeFollower() error {
 	l.votesReceived = nil
 
 	if wasLeader == true {
+		l.SetProcessKind(gen.ProcessKindFollower)
 		if err := l.behavior.HandleBecomeFollower(gen.PID{}); err != nil {
 			return err
 		}
@@ -448,6 +453,7 @@ func (l *Actor) becomeLeader() error {
 	l.cancelElectionTimer()
 	l.resetHeartbeatTimer()
 
+	l.SetProcessKind(gen.ProcessKindLeader)
 	l.Log().Debug("became leader: term=%d", l.term)
 	if err := l.behavior.HandleBecomeLeader(); err != nil {
 		l.becomeFollower()

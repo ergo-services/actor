@@ -4,7 +4,7 @@ go 1.21
 
 require (
 	ergo.services/actor/health v0.0.0
-	ergo.services/ergo v1.999.321-0.20260521070644-eb451aa1e067
+	ergo.services/ergo v1.999.321-0.20260601061146-3bfe2b272201
 )
 
 replace (

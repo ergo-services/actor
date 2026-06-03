@@ -924,6 +924,10 @@ func (a *Actor) ProcessTerminate(reason error) {
 	a.behavior.Terminate(reason)
 }
 
+func (a *Actor) ProcessKind() gen.ProcessKind {
+	return gen.ProcessKindMetrics
+}
+
 //
 // default callbacks for ActorBehavior interface
 //

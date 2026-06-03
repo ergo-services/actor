@@ -1,5 +1,5 @@
-ergo.services/ergo v1.999.321-0.20260526080013-57893e2fe448 h1:xXxUaF89gWdITQKRaN5+it1FPNpknQQzLJ579sdQ1M4=
-ergo.services/ergo v1.999.321-0.20260526080013-57893e2fe448/go.mod h1:2WcCdXUIZvCfy9Kkac3Sx6V/tB23Mx3yK6xz77hRfbM=
+ergo.services/ergo v1.999.321-0.20260601061146-3bfe2b272201 h1:+9LDI/H0DRMXuiWnr4gfs/Mw8fKmbxpyY+7Axhw8eZI=
+ergo.services/ergo v1.999.321-0.20260601061146-3bfe2b272201/go.mod h1:2WcCdXUIZvCfy9Kkac3Sx6V/tB23Mx3yK6xz77hRfbM=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
