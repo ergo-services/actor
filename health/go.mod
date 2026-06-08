@@ -2,4 +2,4 @@ module ergo.services/actor/health
 
 go 1.21
 
-require ergo.services/ergo v1.999.321-0.20260604080356-c601c4697361
+require ergo.services/ergo v1.999.321-0.20260608153021-75b4d2674eca
