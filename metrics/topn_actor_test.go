@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"ergo.services/ergo/gen"
+	"ergo.services/ergo/testing/check"
 	"ergo.services/ergo/testing/unit"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -15,9 +16,14 @@ func makeOwnerPID() gen.PID {
 	return gen.PID{Node: "test@localhost", ID: 9999, Creation: 1}
 }
 
-func spawnTopNActor(t *testing.T, name string, topN int, order TopNOrder, shared *Shared) *unit.TestActor {
+func startTopNNode(t *testing.T) *unit.MockNode {
 	t.Helper()
-	ta, err := unit.Spawn(t, TopNActorFactory, unit.WithArgs(TopNActorOptions{
+	return unit.StartNode(t, "test@localhost", gen.NodeOptions{})
+}
+
+func spawnTopNActor(t *testing.T, name string, topN int, order TopNOrder, shared *Shared) *unit.Subject {
+	t.Helper()
+	ta, err := startTopNNode(t).Spawn(TopNActorFactory, gen.ProcessOptions{}, TopNActorOptions{
 		Name:     name,
 		Help:     "test help",
 		Labels:   []string{"pid", "name"},
@@ -26,7 +32,7 @@ func spawnTopNActor(t *testing.T, name string, topN int, order TopNOrder, shared
 		Shared:   shared,
 		Interval: 100 * time.Millisecond,
 		Owner:    makeOwnerPID(),
-	}))
+	})
 	if err != nil {
 		t.Fatalf("failed to spawn topN actor: %v", err)
 	}
@@ -39,60 +45,31 @@ func TestTopNActorInit(t *testing.T) {
 	shared := NewShared()
 	ta := spawnTopNActor(t, "test_init_metric", 5, TopNMax, shared)
 
-	if ta.IsTerminated() {
+	if ta.Terminated() {
 		t.Fatal("actor should not be terminated after init")
 	}
 
 	// verify RegisterName event
-	found := false
-	for _, event := range ta.Events() {
-		if rn, ok := event.(unit.RegisterNameEvent); ok {
-			if rn.Name == "radar_topn_test_init_metric" {
-				found = true
-			}
-		}
-	}
-	if found == false {
+	if _, err := ta.Node().ProcessPID("radar_topn_test_init_metric"); err != nil {
 		t.Fatal("expected RegisterName event with name 'radar_topn_test_init_metric'")
 	}
 
 	// verify MonitorPID event for owner
-	foundMonitor := false
-	for _, event := range ta.Events() {
-		if m, ok := event.(unit.MonitorEvent); ok {
-			if pid, isPID := m.Target.(gen.PID); isPID && pid == makeOwnerPID() {
-				foundMonitor = true
-			}
-		}
-	}
-	if foundMonitor == false {
-		t.Fatal("expected MonitorPID event for owner")
-	}
+	ta.ShouldMonitor().Target(makeOwnerPID()).Must()
 
 	// verify SendAfter for flush scheduling
-	foundFlush := false
-	for _, event := range ta.Events() {
-		if se, ok := event.(unit.SendEvent); ok {
-			if _, isFlush := se.Message.(messageFlush); isFlush {
-				foundFlush = true
-			}
-		}
-	}
-	if foundFlush == false {
-		t.Fatal("expected SendAfter(messageFlush) event")
-	}
-
+	ta.ShouldSendAfter().Message(messageFlush{}).Must()
 }
 
 func TestTopNActorInitTooFewArgs(t *testing.T) {
-	_, err := unit.Spawn(t, TopNActorFactory, unit.WithArgs("only_one"))
+	_, err := startTopNNode(t).Spawn(TopNActorFactory, gen.ProcessOptions{}, "only_one")
 	if err == nil {
 		t.Fatal("expected error for too few args")
 	}
 }
 
 func TestTopNActorInitNoArgs(t *testing.T) {
-	_, err := unit.Spawn(t, TopNActorFactory)
+	_, err := startTopNNode(t).Spawn(TopNActorFactory, gen.ProcessOptions{})
 	if err == nil {
 		t.Fatal("expected error for no args")
 	}
@@ -112,7 +89,7 @@ func TestTopNActorInitAlreadyRegisteredGaugeVec(t *testing.T) {
 
 	// spawn actor -- should reuse existing collector
 	ta := spawnTopNActor(t, "test_preregistered", 5, TopNMax, shared)
-	if ta.IsTerminated() {
+	if ta.Terminated() {
 		t.Fatal("actor should handle already-registered GaugeVec gracefully")
 	}
 }
@@ -130,7 +107,7 @@ func TestTopNActorObserve(t *testing.T) {
 	ta.SendMessage(sender, MessageTopNObserve{Value: 20, Labels: []string{"pid2", "actor2"}})
 	ta.SendMessage(sender, MessageTopNObserve{Value: 30, Labels: []string{"pid3", "actor3"}})
 
-	if ta.IsTerminated() {
+	if ta.Terminated() {
 		t.Fatal("actor should not terminate after observations")
 	}
 
@@ -178,7 +155,7 @@ func TestTopNActorObserveRespectTopN(t *testing.T) {
 	// trigger flush to write metrics
 	ta.SendMessage(sender, messageFlush{})
 
-	if ta.IsTerminated() {
+	if ta.Terminated() {
 		t.Fatal("actor should not terminate after flush")
 	}
 
@@ -222,7 +199,7 @@ func TestTopNActorFlush(t *testing.T) {
 	// flush
 	ta.SendMessage(sender, messageFlush{})
 
-	if ta.IsTerminated() {
+	if ta.Terminated() {
 		t.Fatal("actor should not terminate after flush")
 	}
 
@@ -252,23 +229,17 @@ func TestTopNActorFlushReschedulesTimer(t *testing.T) {
 
 	sender := gen.PID{Node: "test@localhost", ID: 5000, Creation: 1}
 
-	ta.ClearEvents()
+	mark := ta.Mark()
 
 	// flush
 	ta.SendMessage(sender, messageFlush{})
 
 	// verify a new SendAfter(messageFlush) was scheduled
-	foundFlush := false
-	for _, event := range ta.Events() {
-		if se, ok := event.(unit.SendEvent); ok {
-			if _, isFlush := se.Message.(messageFlush); isFlush && se.After > 0 {
-				foundFlush = true
-			}
-		}
-	}
-	if foundFlush == false {
-		t.Fatal("expected SendAfter(messageFlush) to reschedule after flush")
-	}
+	ta.ShouldSendAfter().
+		Message(messageFlush{}).
+		Where(func(r check.SendAfter) bool { return r.After > 0 }).
+		Since(mark).
+		Must()
 }
 
 func TestTopNActorFlushClearsHeap(t *testing.T) {
@@ -356,12 +327,12 @@ func TestTopNActorOwnerDown(t *testing.T) {
 		Reason: gen.TerminateReasonNormal,
 	})
 
-	if ta.IsTerminated() == false {
+	if ta.Terminated() == false {
 		t.Fatal("actor should terminate when owner goes down")
 	}
 
-	if ta.TerminationReason() != gen.TerminateReasonNormal {
-		t.Fatalf("expected TerminateReasonNormal, got %v", ta.TerminationReason())
+	if ta.Reason() != gen.TerminateReasonNormal {
+		t.Fatalf("expected TerminateReasonNormal, got %v", ta.Reason())
 	}
 
 	// verify GaugeVec was unregistered from prometheus
@@ -393,7 +364,7 @@ func TestTopNActorOwnerDownAfterObservations(t *testing.T) {
 		Reason: gen.TerminateReasonNormal,
 	})
 
-	if ta.IsTerminated() == false {
+	if ta.Terminated() == false {
 		t.Fatal("actor should terminate when owner goes down")
 	}
 }
@@ -406,11 +377,10 @@ func TestTopNActorHandleCallDefault(t *testing.T) {
 
 	caller := gen.PID{Node: "test@localhost", ID: 5000, Creation: 1}
 
-	result := ta.Call(caller, "unknown request")
-	if result.Error != nil {
-		t.Fatalf("HandleCall should not return error for unknown request, got %v", result.Error)
+	if _, err := ta.Call(caller, "unknown request"); err != nil {
+		t.Fatalf("HandleCall should not return error for unknown request, got %v", err)
 	}
-	if ta.IsTerminated() {
+	if ta.Terminated() {
 		t.Fatal("actor should not terminate from HandleCall with unknown request")
 	}
 }
@@ -427,7 +397,7 @@ func TestTopNActorIgnoresUnknownMessages(t *testing.T) {
 	ta.SendMessage(sender, 12345)
 	ta.SendMessage(sender, struct{ Foo string }{Foo: "bar"})
 
-	if ta.IsTerminated() {
+	if ta.Terminated() {
 		t.Fatal("actor should not terminate from unknown messages")
 	}
 }
@@ -480,7 +450,7 @@ func TestTopNActorMultipleFlushCycles(t *testing.T) {
 		}
 	}
 
-	if ta.IsTerminated() {
+	if ta.Terminated() {
 		t.Fatal("actor should not terminate after multiple flush cycles")
 	}
 }
@@ -506,20 +476,20 @@ func TestTopNActorSeparateShared(t *testing.T) {
 	owner := makeOwnerPID()
 	labels := []string{"id"}
 
-	ta1, err := unit.Spawn(t, TopNActorFactory, unit.WithArgs(TopNActorOptions{
+	ta1, err := startTopNNode(t).Spawn(TopNActorFactory, gen.ProcessOptions{}, TopNActorOptions{
 		Name: "metric_a", Help: "help a", Labels: labels,
 		TopN: 3, Order: TopNMax, Shared: shared1,
 		Interval: 100 * time.Millisecond, Owner: owner,
-	}))
+	})
 	if err != nil {
 		t.Fatalf("failed to spawn ta1: %v", err)
 	}
 
-	ta2, err := unit.Spawn(t, TopNActorFactory, unit.WithArgs(TopNActorOptions{
+	ta2, err := startTopNNode(t).Spawn(TopNActorFactory, gen.ProcessOptions{}, TopNActorOptions{
 		Name: "metric_b", Help: "help b", Labels: labels,
 		TopN: 3, Order: TopNMin, Shared: shared2,
 		Interval: 100 * time.Millisecond, Owner: owner,
-	}))
+	})
 	if err != nil {
 		t.Fatalf("failed to spawn ta2: %v", err)
 	}
@@ -548,7 +518,7 @@ func TestTopNActorSeparateShared(t *testing.T) {
 		}
 	}
 
-	if ta1.IsTerminated() || ta2.IsTerminated() {
+	if ta1.Terminated() || ta2.Terminated() {
 		t.Fatal("neither actor should be terminated")
 	}
 }
@@ -570,7 +540,7 @@ func TestTopNActorHighVolume(t *testing.T) {
 	}
 	ta.SendMessage(sender, messageFlush{})
 
-	if ta.IsTerminated() {
+	if ta.Terminated() {
 		t.Fatal("actor should handle high volume without termination")
 	}
 

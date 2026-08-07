@@ -2,4 +2,4 @@ module ergo.services/actor/leader
 
 go 1.23
 
-require ergo.services/ergo v1.999.321-0.20260608202150-ed4e48600507
+require ergo.services/ergo v1.999.321-0.20260802125151-c46964d2cb77
