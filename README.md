@@ -8,16 +8,24 @@ Extra library of actors for the Ergo Framework 3.0 (and above)
 
 ## leader
 
-Distributed leader election actor implementing Raft-inspired consensus algorithm. Provides coordination primitives for building systems that require single leader selection across a cluster - task schedulers, resource managers, single-writer databases, distributed locks.
+Distributed leader election for coordinating work across a cluster - task schedulers, resource managers, singleton workers. Term-based election with a quorum taken over the peers the actor currently knows.
+
+Discovery is your job: resolve peers however suits your deployment and hand the names to `Join`. The actor negotiates with them, and membership propagates through the protocol once one side knows the other.
 
 **Features:**
-- Raft-style leader election with term-based disambiguation
-- Automatic failover on leader failure
-- Network partition safety (split-brain prevention through majority quorum)
-- Dynamic peer discovery
+- Term-based election with automatic failover
+- A leader that steps down on its own once it can no longer reach a quorum
+- `MinClusterSize` floor, so a fragment too small to be a cluster does not operate as one
+- Consumer-driven membership: `Join` / `Leave`, never withdrawn by the library on silence alone
+- Optional confirmation of leadership against an authority outside the cluster
 - No external dependencies
 
+There is one leader per cluster, but the number of clusters is not fixed, so from outside you can see two leaders at once. Not from a dropped connection - that keeps the peer in the view, so quorum does not shrink and only one side can elect - but from diverged views, which is what a cold start without seed nodes produces. Set `MinClusterSize` above half the expected node count and two disjoint groups can never both qualify.
+
+**Two things you must do**, both of which fail quietly if skipped: register the wire types on the node before it carries traffic (`leader.NetworkTypes()`, `leader.ErrorTypes()`), and set `MinClusterSize` deliberately rather than inheriting the default. See [Leader](https://docs.ergo.services/extra-library/actors/leader) for details.
+
 See [documentation](https://docs.ergo.services/extra-library/actors/leader) for details.
+
 
 ## health
 

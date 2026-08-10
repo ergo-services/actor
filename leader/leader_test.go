@@ -1,7 +1,9 @@
 package leader
 
 import (
+	"fmt"
 	"testing"
+	"time"
 
 	"ergo.services/ergo/gen"
 	"ergo.services/ergo/testing/check"
@@ -22,6 +24,7 @@ type TestLeader struct {
 	electionTimeoutMin   int
 	electionTimeoutMax   int
 	heartbeatInterval    int
+	minClusterSize       int
 }
 
 func (t *TestLeader) Init(args ...any) (Options, error) {
@@ -42,6 +45,10 @@ func (t *TestLeader) Init(args ...any) (Options, error) {
 		ElectionTimeoutMin: t.electionTimeoutMin,
 		ElectionTimeoutMax: t.electionTimeoutMax,
 		HeartbeatInterval:  t.heartbeatInterval,
+		// Unset means 1 here, not the shipped default of 3: these tests exercise
+		// mechanics other than the floor and need to reach leadership with few peers.
+		// Floor behaviour is tested explicitly by the tests that set this.
+		MinClusterSize: minClusterSizeOrOne(t.minClusterSize),
 	}
 
 	return opts, nil
@@ -75,6 +82,13 @@ func (t *TestLeader) HandleInspect(from gen.PID, item ...string) map[string]stri
 	return map[string]string{}
 }
 
+func minClusterSizeOrOne(n int) int {
+	if n < 1 {
+		return 1
+	}
+	return n
+}
+
 func factoryTestLeader(clusterID string, bootstrap []gen.ProcessID) gen.ProcessFactory {
 	return func() gen.ProcessBehavior {
 		return &TestLeader{
@@ -82,6 +96,25 @@ func factoryTestLeader(clusterID string, bootstrap []gen.ProcessID) gen.ProcessF
 			bootstrap: bootstrap,
 		}
 	}
+}
+
+// seedPeer puts a peer into the membership the way discoverPeer would, keeping
+// l.declared and l.peers consistent. Writing l.peers alone leaves the peer out of
+// the view and out of every send, since declared is the single source for both.
+func seedPeer(a *Actor, pid gen.PID) {
+	a.peers[pid] = true
+	a.declared[pid.Node] = declaredPeer{
+		target: gen.ProcessID{Name: a.Name(), Node: pid.Node},
+		pid:    pid,
+	}
+}
+
+// testPeerPID builds peer i's PID so it matches the node name replies are sent
+// from. Hand-built names using string(rune(i)) produced "peer\x01@host", so
+// replies arrived from a different PID that discoverPeer added as an extra peer
+// and the quorum arithmetic under test was never the one claimed.
+func testPeerPID(i int) gen.PID {
+	return gen.PID{Node: gen.Atom(fmt.Sprintf("peer%d@host", i)), ID: uint64(i * 100), Creation: 1}
 }
 
 // Test actor API
@@ -143,81 +176,42 @@ func TestAPI_PeersAccessor(t *testing.T) {
 	// Test Peers()
 	peers := behavior.Peers()
 	check.Equal(t, 2, len(peers), "Peers() should return 2 peers")
-
-	// Test HasPeer()
-	check.True(t, behavior.HasPeer(peer1), "Should have peer1")
-	check.True(t, behavior.HasPeer(peer2), "Should have peer2")
-	check.False(t, behavior.HasPeer(gen.PID{Node: "unknown@host", ID: 999, Creation: 1}), "Should not have unknown peer")
 }
 
+// Broadcast reaches every member, including one declared but not yet answered, and
+// reports the failures rather than swallowing them.
 func TestAPI_Broadcast(t *testing.T) {
 	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
 		gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
 
 	behavior := actor.Behavior().(*TestLeader)
 
-	// Add some peers
-	peer1 := gen.PID{Node: "peer1@host", ID: 100, Creation: 1}
-	peer2 := gen.PID{Node: "peer2@host", ID: 200, Creation: 1}
-	behavior.Actor.peers[peer1] = true
-	behavior.Actor.peers[peer2] = true
+	answered := testPeerPID(1)
+	seedPeer(&behavior.Actor, answered)
+	behavior.Join(gen.ProcessID{Name: "leader", Node: "peer2@host"})
 
-	mark := actor.Mark()
+	failed, err := behavior.Broadcast("ping")
+	check.Equal(t, 0, failed)
+	check.NoError(t, err)
 
-	// Test Broadcast()
-	testMsg := "test-broadcast"
-	behavior.Broadcast(testMsg)
-
-	// Check that message was sent to all peers
-	sentTo := make(map[gen.PID]bool)
-
-	for _, se := range actor.ShouldSend().Since(mark).Collect() {
-		if se.Message == testMsg {
-			if pid, ok := se.To.(gen.PID); ok {
-				sentTo[pid] = true
-			}
-		}
-	}
-
-	check.Equal(t, 2, len(sentTo), "Should send to 2 peers")
-	check.True(t, sentTo[peer1], "Should send to peer1")
-	check.True(t, sentTo[peer2], "Should send to peer2")
+	actor.ShouldSend().To(answered).Message("ping").Once().Assert()
+	actor.ShouldSend().To(gen.ProcessID{Name: "leader", Node: "peer2@host"}).
+		Message("ping").Once().Assert()
 }
 
-func TestAPI_BroadcastBootstrap(t *testing.T) {
-	bootstrap := []gen.ProcessID{
-		{Name: "leader", Node: "node1@host"},
-		{Name: "leader", Node: "node2@host"},
-		{Name: "leader", Node: "node3@host"},
-	}
-
-	actor, _ := unit.StartNode(t, "node1@host", gen.NodeOptions{}).
-		SpawnRegister("leader", factoryTestLeader("test-cluster", bootstrap),
-			gen.ProcessOptions{}, "test-cluster", bootstrap)
+func TestAPI_BroadcastReportsFailures(t *testing.T) {
+	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
+		gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
 
 	behavior := actor.Behavior().(*TestLeader)
 
-	mark := actor.Mark()
+	broken := testPeerPID(1)
+	seedPeer(&behavior.Actor, broken)
+	actor.OnSend(broken).Fail(gen.ErrNoConnection)
 
-	// Test BroadcastBootstrap()
-	testMsg := "bootstrap-broadcast"
-	behavior.BroadcastBootstrap(testMsg)
-
-	// Check that messages were sent to bootstrap peers (excluding self)
-	messageCount := 0
-
-	for _, se := range actor.ShouldSend().Since(mark).Collect() {
-		if se.Message == testMsg {
-			if procID, ok := se.To.(gen.ProcessID); ok {
-				// Should not be self
-				check.NotEqual(t, "node1@host", procID.Node.String(), "Should not send to self")
-				messageCount++
-			}
-		}
-	}
-
-	// Should send to 2 bootstrap peers (node2 and node3, excluding self node1)
-	check.Equal(t, 2, messageCount, "Should send to 2 bootstrap peers (excluding self)")
+	failed, err := behavior.Broadcast("ping")
+	check.Equal(t, 1, failed, "a failed target must be counted, not swallowed")
+	check.ErrorIs(t, err, gen.ErrNoConnection)
 }
 
 func TestAPI_CallbackPeerJoined(t *testing.T) {
@@ -280,7 +274,7 @@ func TestAPI_CallbackPeerLeft(t *testing.T) {
 	check.False(t, behavior.HasPeer(peer1), "Should not have peer1 anymore")
 }
 
-func TestAPI_CallbackTermChanged(t *testing.T) {
+func TestAPI_TermAccessorAdoptsHigherTerms(t *testing.T) {
 	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
 		gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
 
@@ -321,7 +315,7 @@ func TestAPI_TermAccessorDuringElection(t *testing.T) {
 	initialTerm := behavior.Term()
 
 	// Trigger election
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 
 	// Term should increment
 	check.Equal(t, initialTerm+1, behavior.Term(), "Term should increment during election")
@@ -381,7 +375,7 @@ func TestLeaderElection_SingleNode(t *testing.T) {
 	behavior := actor.Behavior().(*TestLeader)
 
 	// Send election timeout to trigger election
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 
 	// Single node should become leader immediately (quorum = 0/2 + 1 = 1)
 	check.True(t, behavior.becameLeaderCalled, "Single node should become leader")
@@ -482,12 +476,14 @@ func TestLeaderElection_VoteRequest_LowerTerm(t *testing.T) {
 		Candidate: remotePID2,
 	})
 
-	// Find the rejection in all events
+	// Deliberately partial: Term and Granted only. The full-struct assertion,
+	// including the ClusterID that L1 omits, is in
+	// TestCanary_L1_StaleTermVoteRejectionCarriesClusterID. Do not duplicate it here.
 	foundRejection := false
 	for _, se := range actor.ShouldSend().Collect() {
 		if se.To == remotePID2 {
 			if vr, ok := se.Message.(msgVoteReply); ok {
-				if vr.Term == 10 && !vr.Granted {
+				if vr.Term == 10 && vr.Granted == false {
 					foundRejection = true
 					break
 				}
@@ -603,11 +599,11 @@ func TestLeaderElection_VoteReply_WrongCluster(t *testing.T) {
 	// Add peers so we don't become leader immediately
 	peer1 := gen.PID{Node: "peer1@host", ID: 100, Creation: 1}
 	peer2 := gen.PID{Node: "peer2@host", ID: 200, Creation: 1}
-	behavior.peers[peer1] = true
-	behavior.peers[peer2] = true
+	seedPeer(&behavior.Actor, peer1)
+	seedPeer(&behavior.Actor, peer2)
 
 	// Become candidate
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 
 	remotePID := gen.PID{Node: "remote@host", ID: 300, Creation: 1}
 
@@ -684,7 +680,7 @@ func TestLeaderElection_SplitBrain_SameTerm(t *testing.T) {
 	behavior := actor.Behavior().(*TestLeader)
 
 	// Become leader
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 
 	check.True(t, behavior.IsLeader(), "Should be leader initially")
 
@@ -708,9 +704,14 @@ func TestLeaderElection_SplitBrain_SameTerm(t *testing.T) {
 
 // Test: Leader sends heartbeats
 func TestLeaderElection_LeaderSendsHeartbeats(t *testing.T) {
+	// node3 and node4 answer and become followers; node2 stays silent and is therefore
+	// not a follower at all. A majority of the declared view of four is three, so two
+	// grants plus the self-vote elect.
 	bootstrap := []gen.ProcessID{
 		{Name: "leader", Node: "node1@host"},
 		{Name: "leader", Node: "node2@host"},
+		{Name: "leader", Node: "node3@host"},
+		{Name: "leader", Node: "node4@host"},
 	}
 
 	actor, _ := unit.StartNode(t, "node1@host", gen.NodeOptions{}).
@@ -719,27 +720,35 @@ func TestLeaderElection_LeaderSendsHeartbeats(t *testing.T) {
 
 	behavior := actor.Behavior().(*TestLeader)
 
-	// Become leader
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
+	for _, node := range []gen.Atom{"node3@host", "node4@host"} {
+		actor.SendMessage(gen.PID{Node: node, ID: 1, Creation: 1},
+			msgVoteReply{ClusterID: "test-cluster", Term: behavior.Actor.term, Granted: true})
+	}
 
 	check.True(t, behavior.IsLeader(), "Should be leader")
 
 	mark := actor.Mark()
 
 	// Trigger heartbeat timeout
-	actor.SendMessage(actor.PID(), msgHeartbeatTimeout{})
+	actor.FireTimers()
 
-	// Should send heartbeat to bootstrap peers (excluding self)
+	hb := msgHeartbeat{ClusterID: "test-cluster", Term: behavior.term, Leader: behavior.PID()}
+
+	// Every peer that answered gets one.
+	for _, node := range []gen.Atom{"node3@host", "node4@host"} {
+		actor.ShouldSend().
+			To(gen.PID{Node: node, ID: 1, Creation: 1}).
+			Message(hb).Since(mark).Once().Assert()
+	}
+
+	// node2 never answered, so it is not a follower and gets nothing. Addressing it by
+	// name would make every tick attempt a connection to a node that may not exist, and
+	// establishing one is synchronous inside this callback. A peer that comes up
+	// campaigns and is corrected by the reply instead.
 	actor.ShouldSend().
 		To(gen.ProcessID{Name: "leader", Node: "node2@host"}).
-		Message(msgHeartbeat{
-			ClusterID: "test-cluster",
-			Term:      behavior.term,
-			Leader:    behavior.PID(),
-		}).
-		Since(mark).
-		Once().
-		Assert()
+		Since(mark).None().Assert()
 }
 
 // Test: Peer discovery
@@ -811,6 +820,7 @@ func TestLeaderElection_PeerRemoval(t *testing.T) {
 
 // Test: Leader failure triggers new election
 func TestLeaderElection_LeaderFailure(t *testing.T) {
+
 	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
 		gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
 
@@ -837,11 +847,16 @@ func TestLeaderElection_LeaderFailure(t *testing.T) {
 		Reason: gen.TerminateReasonNormal,
 	})
 
-	// becomeFollower is only called if wasLeader==true
-	// In this case we're a follower, so it won't be called
-	// Just check that leader is cleared
 	check.Equal(t, gen.PID{}, behavior.Leader(), "Leader should be cleared")
 	check.False(t, behavior.IsLeader(), "Should not be leader")
+
+	// L7: becomeFollower gates the callback on wasLeader, so a follower losing its
+	// leader is invisible to the behaviour, and a consumer caching the leader node
+	// is never told to clear it. This used to be a comment where the assertion goes.
+	check.True(t, behavior.becameFollowerCalled,
+		"L7: losing the leader must notify the behaviour, not only demoted leaders")
+	check.Equal(t, gen.PID{}, behavior.becameFollowerLeader,
+		"the notification must report an empty leader PID")
 }
 
 // Test: Vote counting - need majority
@@ -857,13 +872,13 @@ func TestLeaderElection_VoteCounting_Majority(t *testing.T) {
 	peer2 := gen.PID{Node: "peer2@host", ID: 200, Creation: 1}
 	peer3 := gen.PID{Node: "peer3@host", ID: 300, Creation: 1}
 	peer4 := gen.PID{Node: "peer4@host", ID: 400, Creation: 1}
-	behavior.peers[peer1] = true
-	behavior.peers[peer2] = true
-	behavior.peers[peer3] = true
-	behavior.peers[peer4] = true
+	seedPeer(&behavior.Actor, peer1)
+	seedPeer(&behavior.Actor, peer2)
+	seedPeer(&behavior.Actor, peer3)
+	seedPeer(&behavior.Actor, peer4)
 
 	// Become candidate
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 
 	check.False(t, behavior.IsLeader(), "Should not be leader yet (only 1 vote)")
 
@@ -898,12 +913,12 @@ func TestLeaderElection_VoteCounting_Rejected(t *testing.T) {
 	// Add 2 peers (total 3 nodes)
 	// Need 2 votes to win (3/2 + 1 = 2)
 	for i := 1; i <= 2; i++ {
-		peer := gen.PID{Node: gen.Atom("peer" + string(rune(i)) + "@host"), ID: uint64(i * 100), Creation: 1}
-		behavior.peers[peer] = true
+		peer := testPeerPID(i)
+		seedPeer(&behavior.Actor, peer)
 	}
 
 	// Become candidate
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 
 	// Receive rejected vote
 	peer1 := gen.PID{Node: "peer1@host", ID: 100, Creation: 1}
@@ -926,7 +941,7 @@ func TestLeaderElection_VoteReply_HigherTerm(t *testing.T) {
 
 	// Become candidate in term 5
 	behavior.term = 4
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 
 	check.Equal(t, uint64(5), behavior.term, "Should be in term 5")
 
@@ -954,15 +969,15 @@ func TestLeaderInspect(t *testing.T) {
 	// Add some peers
 	peer1 := gen.PID{Node: "peer1@host", ID: 100, Creation: 1}
 	peer2 := gen.PID{Node: "peer2@host", ID: 200, Creation: 1}
-	behavior.peers[peer1] = true
-	behavior.peers[peer2] = true
+	seedPeer(&behavior.Actor, peer1)
+	seedPeer(&behavior.Actor, peer2)
 
 	// Call the Actor's HandleInspect (which uses default implementation from leader.Actor)
 	result := behavior.Actor.HandleInspect(gen.PID{})
 
-	check.Equal(t, "test-cluster", result["cluster"], "Cluster should match")
-	check.Equal(t, "5", result["term"], "Term should match")
-	check.Equal(t, "2", result["peers"], "Peer count should match")
+	check.Equal(t, "test-cluster", result["ergo:cluster"], "Cluster should match")
+	check.Equal(t, "5", result["ergo:term"], "Term should match")
+	check.Equal(t, "2", result["ergo:peers"], "Peer count should match")
 }
 
 // Test: IsLeader and Leader accessors
@@ -977,7 +992,7 @@ func TestLeaderAccessors(t *testing.T) {
 	check.Equal(t, gen.PID{}, behavior.Leader(), "Leader should be empty initially")
 
 	// Become leader
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 
 	// Now leader
 	check.True(t, behavior.IsLeader(), "Should be leader")
@@ -993,12 +1008,12 @@ func TestLeaderElection_VotesReceivedCleared(t *testing.T) {
 
 	// Add some peers
 	for i := 1; i <= 2; i++ {
-		peer := gen.PID{Node: gen.Atom("peer" + string(rune(i)) + "@host"), ID: uint64(i * 100), Creation: 1}
-		behavior.peers[peer] = true
+		peer := testPeerPID(i)
+		seedPeer(&behavior.Actor, peer)
 	}
 
 	// Become candidate - this creates votesReceived map
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 
 	check.NotNil(t, behavior.votesReceived, "votesReceived should be initialized")
 
@@ -1010,10 +1025,10 @@ func TestLeaderElection_VotesReceivedCleared(t *testing.T) {
 		Leader:    leader,
 	})
 
-	// votesReceived should be cleared (nil, not empty map)
-	if behavior.votesReceived != nil {
-		check.Equal(t, 0, len(behavior.votesReceived), "votesReceived should be cleared when becoming follower")
-	}
+	// Asserted inside `if behavior.votesReceived != nil`, a guard that is false
+	// exactly when the code is correct, so nothing was asserted at all.
+	check.Nil(t, behavior.votesReceived,
+		"votesReceived must be nil after stepping down, so a late grant cannot be counted")
 }
 
 // Test: Self-discovery is prevented
@@ -1054,7 +1069,7 @@ func TestLeaderElection_FollowerNoHeartbeats(t *testing.T) {
 	mark := actor.Mark()
 
 	// Send heartbeat timeout as follower
-	actor.SendMessage(actor.PID(), msgHeartbeatTimeout{})
+	actor.FireTimers()
 
 	// Should not send any heartbeats
 	for _, se := range actor.ShouldSend().Since(mark).Collect() {
@@ -1074,12 +1089,12 @@ func TestLeaderElection_NoLeaderWithoutQuorum(t *testing.T) {
 	// Add 4 peers (total 5 nodes)
 	// Need 3 votes to win
 	for i := 1; i <= 4; i++ {
-		peer := gen.PID{Node: gen.Atom("peer" + string(rune(i)) + "@host"), ID: uint64(i * 100), Creation: 1}
-		behavior.peers[peer] = true
+		peer := testPeerPID(i)
+		seedPeer(&behavior.Actor, peer)
 	}
 
 	// Become candidate (1 vote - self)
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 
 	// Get only 1 more vote (total 2, need 3)
 	peer1 := gen.PID{Node: "peer1@host", ID: 100, Creation: 1}
@@ -1102,11 +1117,11 @@ func TestLeaderElection_OldVoteRepliesIgnored(t *testing.T) {
 
 	// Add peer so we don't become leader immediately
 	peer := gen.PID{Node: "peer@host", ID: 100, Creation: 1}
-	behavior.peers[peer] = true
+	seedPeer(&behavior.Actor, peer)
 
 	// Become candidate in term 5
 	behavior.term = 4
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 
 	term5 := behavior.term // Should be 5
 
@@ -1181,32 +1196,76 @@ func TestLeaderElection_PartitionLeaderInMajority(t *testing.T) {
 	peer3 := gen.PID{Node: "peer3@host", ID: 300, Creation: 1}
 	peer4 := gen.PID{Node: "peer4@host", ID: 400, Creation: 1}
 	peer5 := gen.PID{Node: "peer5@host", ID: 500, Creation: 1}
-	behavior.peers[peer2] = true
-	behavior.peers[peer3] = true
-	behavior.peers[peer4] = true
-	behavior.peers[peer5] = true
+	seedPeer(&behavior.Actor, peer2)
+	seedPeer(&behavior.Actor, peer3)
+	seedPeer(&behavior.Actor, peer4)
+	seedPeer(&behavior.Actor, peer5)
 
 	// Become leader
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 	actor.SendMessage(peer2, msgVoteReply{ClusterID: "test-cluster", Term: behavior.Actor.term, Granted: true})
 	actor.SendMessage(peer3, msgVoteReply{ClusterID: "test-cluster", Term: behavior.Actor.term, Granted: true})
 
 	check.True(t, behavior.IsLeader(), "Should become leader with majority")
 
-	// Simulate partition: we have peer2, peer3 (majority of 3 out of 5)
-	// peer4 and peer5 are isolated
-	delete(behavior.peers, peer4)
-	delete(behavior.peers, peer5)
-
-	// Simulate peer4 and peer5 going down
+	// peer4 and peer5 are isolated, we keep peer2 and peer3, so we hold 3 of 5.
+	// Deleting them from behavior.peers before delivering the downs made
+	// leader.go:257 false and skipped the removal path under test.
 	actor.SendMessage(actor.PID(), gen.MessageDownPID{PID: peer4, Reason: gen.TerminateReasonNormal})
 	actor.SendMessage(actor.PID(), gen.MessageDownPID{PID: peer5, Reason: gen.TerminateReasonNormal})
 
-	// We should remain leader (still have majority: us + peer2 + peer3 = 3)
+	check.Equal(t, 2, len(behavior.peers), "the down messages must have removed both peers")
+	check.False(t, behavior.HasPeer(peer4), "peer4 must be gone")
+	check.False(t, behavior.HasPeer(peer5), "peer5 must be gone")
+
+	// Still in contact with a majority (self + peer2 + peer3 = 3 of 5), so
+	// leadership is legitimately retained.
 	check.True(t, behavior.IsLeader(), "Should remain leader with majority partition")
 }
 
-// Test: Leader in minority partition steps down
+// Counterpart to TestLeaderElection_PartitionLeaderInMajority: the difference
+// between a leader that notices it is isolated and one that holds leadership for
+// 32.8 hours with an empty peer set.
+func TestLeaderElection_PartitionLeaderInMinorityStepsDownUnprompted(t *testing.T) {
+	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
+		gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
+
+	behavior := actor.Behavior().(*TestLeader)
+
+	peers := []gen.PID{testPeerPID(2), testPeerPID(3), testPeerPID(4), testPeerPID(5)}
+	for _, peer := range peers {
+		seedPeer(&behavior.Actor, peer)
+	}
+
+	actor.FireTimers()
+	actor.SendMessage(peers[0], msgVoteReply{ClusterID: "test-cluster", Term: behavior.Actor.term, Granted: true})
+	actor.SendMessage(peers[1], msgVoteReply{ClusterID: "test-cluster", Term: behavior.Actor.term, Granted: true})
+
+	check.True(t, behavior.IsLeader(), "Should be leader initially")
+
+	// The peers stay in the view - nobody withdrew them and no monitor fired - but
+	// they become unreachable. This is the shape of the production failure: a leader
+	// whose members are still declared and no longer answering. Removing them from the
+	// view instead would shrink quorum along with it, and leading a view of one is
+	// legitimate.
+	for _, peer := range peers {
+		actor.OnSend(peer).Fail(gen.ErrNoConnection)
+	}
+
+	// Age the last contact past one election timeout. Nothing arrives to refresh it,
+	// so the next heartbeat tick has to notice on its own.
+	for node := range behavior.Actor.lastContact {
+		behavior.Actor.lastContact[node] = time.Now().Add(-time.Hour)
+	}
+
+	actor.FireTimers()
+
+	check.False(t, behavior.IsLeader(),
+		"a leader out of contact with a majority must step down without being told")
+	check.True(t, behavior.becameFollowerCalled,
+		"HandleBecomeFollower must fire so the consumer tears down its singleton")
+	actor.ShouldLog().Level(gen.LogLevelWarning).Containing("lost quorum contact").Once().Assert()
+}
 func TestLeaderElection_PartitionLeaderInMinority(t *testing.T) {
 	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
 		gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
@@ -1218,13 +1277,13 @@ func TestLeaderElection_PartitionLeaderInMinority(t *testing.T) {
 	peer3 := gen.PID{Node: "peer3@host", ID: 300, Creation: 1}
 	peer4 := gen.PID{Node: "peer4@host", ID: 400, Creation: 1}
 	peer5 := gen.PID{Node: "peer5@host", ID: 500, Creation: 1}
-	behavior.peers[peer2] = true
-	behavior.peers[peer3] = true
-	behavior.peers[peer4] = true
-	behavior.peers[peer5] = true
+	seedPeer(&behavior.Actor, peer2)
+	seedPeer(&behavior.Actor, peer3)
+	seedPeer(&behavior.Actor, peer4)
+	seedPeer(&behavior.Actor, peer5)
 
 	// Become leader
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 	actor.SendMessage(peer2, msgVoteReply{ClusterID: "test-cluster", Term: behavior.Actor.term, Granted: true})
 	actor.SendMessage(peer3, msgVoteReply{ClusterID: "test-cluster", Term: behavior.Actor.term, Granted: true})
 
@@ -1248,8 +1307,12 @@ func TestLeaderElection_PartitionLeaderInMinority(t *testing.T) {
 
 // Test: Follower in minority partition cannot elect self
 func TestLeaderElection_FollowerInMinorityCannotElect(t *testing.T) {
-	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
-		gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
+	// MinClusterSize is what stops the shrinking view from lowering the bar: quorum over a
+	// 2-node view is 2 and would otherwise be reachable.
+	factory := func() gen.ProcessBehavior {
+		return &TestLeader{clusterID: "test-cluster", minClusterSize: 3}
+	}
+	actor, _ := unit.Spawn(t, factory, gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
 
 	behavior := actor.Behavior().(*TestLeader)
 
@@ -1258,10 +1321,10 @@ func TestLeaderElection_FollowerInMinorityCannotElect(t *testing.T) {
 	peer3 := gen.PID{Node: "peer3@host", ID: 300, Creation: 1}
 	peer4 := gen.PID{Node: "peer4@host", ID: 400, Creation: 1}
 	peer5 := gen.PID{Node: "peer5@host", ID: 500, Creation: 1}
-	behavior.peers[peer2] = true
-	behavior.peers[peer3] = true
-	behavior.peers[peer4] = true
-	behavior.peers[peer5] = true
+	seedPeer(&behavior.Actor, peer2)
+	seedPeer(&behavior.Actor, peer3)
+	seedPeer(&behavior.Actor, peer4)
+	seedPeer(&behavior.Actor, peer5)
 
 	// Simulate we're in minority partition with only peer2
 	// Remove others from peer map (simulate partition)
@@ -1270,19 +1333,22 @@ func TestLeaderElection_FollowerInMinorityCannotElect(t *testing.T) {
 	delete(behavior.peers, peer5)
 
 	// Try to become candidate
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 
-	// We only have 1 peer (peer2), need 2 votes for majority out of 2 nodes
-	// We vote for ourselves (1 vote)
+	// Self plus peer2 is 2 of the 5-node cluster. That is a minority, so this
+	// grant must not be enough.
 	actor.SendMessage(peer2, msgVoteReply{
 		ClusterID: "test-cluster",
 		Term:      behavior.Actor.term,
 		Granted:   true,
 	})
 
-	// With 2 votes (self + peer2) out of 2 nodes, we become leader
-	// But this represents minority of original 5-node cluster
-	check.True(t, behavior.IsLeader(), "Can become leader of minority partition")
+	// Used to assert the opposite. The quorum denominator shrinks with the peer
+	// set, so losing contact lowers the bar for taking leadership.
+	check.False(t, behavior.IsLeader(),
+		"a 2-of-5 minority must not elect a leader")
+	check.False(t, behavior.becameLeaderCalled,
+		"HandleBecomeLeader must not fire for a minority partition")
 }
 
 // Test: Rapid leader changes
@@ -1340,13 +1406,13 @@ func TestLeaderElection_UnresponsivePeers(t *testing.T) {
 	peer3 := gen.PID{Node: "peer3@host", ID: 300, Creation: 1}
 	peer4 := gen.PID{Node: "peer4@host", ID: 400, Creation: 1}
 	peer5 := gen.PID{Node: "peer5@host", ID: 500, Creation: 1}
-	behavior.peers[peer2] = true
-	behavior.peers[peer3] = true
-	behavior.peers[peer4] = true
-	behavior.peers[peer5] = true
+	seedPeer(&behavior.Actor, peer2)
+	seedPeer(&behavior.Actor, peer3)
+	seedPeer(&behavior.Actor, peer4)
+	seedPeer(&behavior.Actor, peer5)
 
 	// Become candidate
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 
 	// Only 2 peers respond (we need 3 for majority of 5)
 	actor.SendMessage(peer2, msgVoteReply{
@@ -1370,8 +1436,8 @@ func TestLeaderElection_ConcurrentElections(t *testing.T) {
 
 	candidate1 := gen.PID{Node: "cand1@host", ID: 100, Creation: 1}
 	candidate2 := gen.PID{Node: "cand2@host", ID: 200, Creation: 1}
-	behavior.peers[candidate1] = true
-	behavior.peers[candidate2] = true
+	seedPeer(&behavior.Actor, candidate1)
+	seedPeer(&behavior.Actor, candidate2)
 
 	mark := actor.Mark()
 
@@ -1508,7 +1574,7 @@ func TestLeaderElection_StaleLeaderStepsDown(t *testing.T) {
 	behavior := actor.Behavior().(*TestLeader)
 
 	// Become leader in term 5
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 	check.True(t, behavior.IsLeader(), "Should be leader")
 	currentTerm := behavior.Actor.term
 
@@ -1536,11 +1602,11 @@ func TestLeaderElection_CandidateReceivesHeartbeat(t *testing.T) {
 	// Add peers
 	peer1 := gen.PID{Node: "peer1@host", ID: 100, Creation: 1}
 	peer2 := gen.PID{Node: "peer2@host", ID: 200, Creation: 1}
-	behavior.peers[peer1] = true
-	behavior.peers[peer2] = true
+	seedPeer(&behavior.Actor, peer1)
+	seedPeer(&behavior.Actor, peer2)
 
 	// Become candidate
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 
 	check.False(t, behavior.IsLeader(), "Should be candidate (not yet leader)")
 	candidateTerm := behavior.Actor.term
@@ -1609,11 +1675,11 @@ func TestLeaderElection_ReElectionAfterSplitVote(t *testing.T) {
 	// Setup 3-node cluster, need 2 votes
 	peer1 := gen.PID{Node: "peer1@host", ID: 100, Creation: 1}
 	peer2 := gen.PID{Node: "peer2@host", ID: 200, Creation: 1}
-	behavior.peers[peer1] = true
-	behavior.peers[peer2] = true
+	seedPeer(&behavior.Actor, peer1)
+	seedPeer(&behavior.Actor, peer2)
 
 	// First election - split vote (no one gets majority)
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 	term1 := behavior.Actor.term
 
 	// peer1 rejects (voted for someone else)
@@ -1626,7 +1692,7 @@ func TestLeaderElection_ReElectionAfterSplitVote(t *testing.T) {
 	check.False(t, behavior.IsLeader(), "Should not become leader with split vote")
 
 	// Second election - timeout again, new term
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 	term2 := behavior.Actor.term
 
 	check.Equal(t, term1+1, term2, "Should increment term for new election")
@@ -1659,7 +1725,7 @@ func TestLeaderElection_BootstrapPeerMessaging(t *testing.T) {
 	mark := actor.Mark()
 
 	// Become candidate
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 
 	// Should send vote requests to bootstrap peers (excluding self)
 	bootstrapVotes := 0
@@ -1684,8 +1750,8 @@ func TestLeaderElection_BootstrapPeerMessaging(t *testing.T) {
 	check.Equal(t, 2, bootstrapVotes, "Should send vote requests to 2 bootstrap peers (excluding self)")
 }
 
-// Test: Leader sends heartbeats to both discovered peers and bootstrap
-func TestLeaderElection_HeartbeatToAllPeers(t *testing.T) {
+// Test: heartbeats go to the peers that answered, and only to them
+func TestLeaderElection_HeartbeatOnlyToAnsweredPeers(t *testing.T) {
 	bootstrap := []gen.ProcessID{
 		{Name: "leader", Node: "node1@host"},
 		{Name: "leader", Node: "node2@host"},
@@ -1699,28 +1765,30 @@ func TestLeaderElection_HeartbeatToAllPeers(t *testing.T) {
 
 	// Discover a peer (not in bootstrap)
 	discoveredPeer := gen.PID{Node: "discovered@host", ID: 999, Creation: 1}
-	behavior.peers[discoveredPeer] = true
+	seedPeer(&behavior.Actor, discoveredPeer)
 
 	// Add another peer to ensure we don't become leader immediately
 	anotherPeer := gen.PID{Node: "another@host", ID: 888, Creation: 1}
-	behavior.peers[anotherPeer] = true
+	seedPeer(&behavior.Actor, anotherPeer)
 
 	// Become leader by getting votes
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	// The declared view is four - self, the bootstrap entry on node2, and the two
+	// discovered peers - so a majority is three.
+	actor.FireTimers()
 	actor.SendMessage(discoveredPeer, msgVoteReply{ClusterID: "test-cluster", Term: behavior.Actor.term, Granted: true})
+	actor.SendMessage(anotherPeer, msgVoteReply{ClusterID: "test-cluster", Term: behavior.Actor.term, Granted: true})
 
 	check.True(t, behavior.IsLeader(), "Should be leader")
 
 	mark := actor.Mark()
 
 	// Send heartbeat
-	actor.SendMessage(actor.PID(), msgHeartbeatTimeout{})
+	actor.FireTimers()
 
-	// Should send to discovered peers and bootstrap peer
-
-	// Count heartbeats (allow duplicates for now - that's a known inefficiency, not a bug)
-	discoveredHeartbeats := 0
-	bootstrapHeartbeats := 0
+	// Exact counts, not "> 0" with duplicates waived in a comment. One message per
+	// member, and none to a member that has never answered.
+	answeredHeartbeats := 0
+	unresolvedHeartbeats := 0
 	selfHeartbeats := 0
 
 	for _, se := range actor.ShouldSend().Since(mark).Collect() {
@@ -1730,22 +1798,23 @@ func TestLeaderElection_HeartbeatToAllPeers(t *testing.T) {
 
 			if pid, ok := se.To.(gen.PID); ok {
 				if pid.Node == "discovered@host" || pid.Node == "another@host" {
-					discoveredHeartbeats++
+					answeredHeartbeats++
 				} else if pid.Node == "node1@host" {
 					selfHeartbeats++
 				}
 			} else if procID, ok := se.To.(gen.ProcessID); ok {
-				if procID.Node == "node2@host" {
-					bootstrapHeartbeats++
-				} else if procID.Node == "node1@host" {
+				if procID.Node == "node1@host" {
 					selfHeartbeats++
+				} else {
+					unresolvedHeartbeats++
 				}
 			}
 		}
 	}
 
-	check.True(t, discoveredHeartbeats > 0, "Should send heartbeat to discovered peers")
-	check.True(t, bootstrapHeartbeats > 0, "Should send heartbeat to bootstrap peer")
+	check.Equal(t, 2, answeredHeartbeats, "exactly one heartbeat per peer that answered")
+	check.Equal(t, 0, unresolvedHeartbeats,
+		"a declared peer that never answered is not a follower and must not be dialled")
 	check.Equal(t, 0, selfHeartbeats, "Should not send heartbeat to self")
 }
 
@@ -1781,7 +1850,7 @@ func TestLeaderElection_LeaderReceivesOwnTermHeartbeat(t *testing.T) {
 	behavior := actor.Behavior().(*TestLeader)
 
 	// Become leader
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 	check.True(t, behavior.IsLeader(), "Should be leader")
 
 	currentTerm := behavior.Actor.term
@@ -1885,11 +1954,11 @@ func TestLeaderElection_LeaderReceivesOldVoteReply(t *testing.T) {
 
 	// Become leader in term 10
 	peer := gen.PID{Node: "peer@host", ID: 100, Creation: 1}
-	behavior.peers[peer] = true
+	seedPeer(&behavior.Actor, peer)
 
 	// Set term to 9, then trigger election to get term 10
 	behavior.Actor.term = 9
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 	actor.SendMessage(peer, msgVoteReply{
 		ClusterID: "test-cluster",
 		Term:      10,
@@ -1964,11 +2033,11 @@ func TestLeaderElection_CandidateStepsDownOnHigherTermHeartbeat(t *testing.T) {
 
 	peer1 := gen.PID{Node: "peer1@host", ID: 100, Creation: 1}
 	peer2 := gen.PID{Node: "peer2@host", ID: 200, Creation: 1}
-	behavior.peers[peer1] = true
-	behavior.peers[peer2] = true
+	seedPeer(&behavior.Actor, peer1)
+	seedPeer(&behavior.Actor, peer2)
 
 	// Become candidate (won't become leader without votes from peers)
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 
 	candidateTerm := behavior.Actor.term
 	check.False(t, behavior.IsLeader(), "Should be candidate (not leader yet)")
@@ -1988,22 +2057,28 @@ func TestLeaderElection_CandidateStepsDownOnHigherTermHeartbeat(t *testing.T) {
 	check.Equal(t, leader, behavior.Leader(), "Should recognize leader")
 }
 
-// Test: Zero peers - immediate leader election
-func TestLeaderElection_ZeroPeersImmediateElection(t *testing.T) {
-	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
-		gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
+// Was TestLeaderElection_ZeroPeersImmediateElection, asserting the opposite. An
+// empty peer set means "nobody has talked to me yet", indistinguishable from "I
+// am cut off" (L8), so it is not evidence of being alone.
+//
+// Companion case, once Options carries an expected size: a node declared as a
+// single-node cluster must still self-elect. TestLeaderElection_SingleNode.
+func TestLeaderElection_ZeroPeersMustNotSelfElect(t *testing.T) {
+	factory := func() gen.ProcessBehavior {
+		return &TestLeader{clusterID: "test-cluster", minClusterSize: 3}
+	}
+	actor, _ := unit.Spawn(t, factory, gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
 
 	behavior := actor.Behavior().(*TestLeader)
 
-	// No peers in map
 	check.Equal(t, 0, len(behavior.peers), "Should have no peers")
 
-	// Trigger election
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 
-	// With 0 peers, quorum is 0/2 + 1 = 1
-	// Self-vote (1) >= quorum (1), so should become leader immediately
-	check.True(t, behavior.IsLeader(), "Should become leader immediately with no peers")
+	check.False(t, behavior.IsLeader(),
+		"must not take leadership from an undeclared, empty peer set")
+	check.False(t, behavior.becameLeaderCalled,
+		"HandleBecomeLeader must not fire without a declared single-node configuration")
 }
 
 // Test: Election after leader becomes unresponsive (no heartbeats)
@@ -2015,7 +2090,7 @@ func TestLeaderElection_UnresponsiveLeaderTimeout(t *testing.T) {
 
 	// Add a peer so we don't become leader immediately
 	peer := gen.PID{Node: "peer@host", ID: 999, Creation: 1}
-	behavior.peers[peer] = true
+	seedPeer(&behavior.Actor, peer)
 
 	leader := gen.PID{Node: "leader@host", ID: 100, Creation: 1}
 
@@ -2030,7 +2105,7 @@ func TestLeaderElection_UnresponsiveLeaderTimeout(t *testing.T) {
 	check.False(t, behavior.IsLeader(), "Should be follower")
 
 	// Simulate election timeout (no heartbeats received)
-	actor.SendMessage(actor.PID(), msgElectionTimeout{})
+	actor.FireTimers()
 
 	// Should become candidate (not leader yet - need peer's vote)
 	check.False(t, behavior.IsLeader(), "Should be candidate (not leader yet without votes)")
