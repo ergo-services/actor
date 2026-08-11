@@ -8,9 +8,9 @@ Full documentation: [docs.ergo.services/extra-library/actors/leader](https://doc
 
 ## Three things to get right
 
-All three fail quietly if skipped - the node starts, nothing errors, and the problem appears later as a cluster that never converges.
+The last two fail quietly if skipped - the node starts, nothing errors, and the problem appears later as a cluster that never converges. The first one used to, and now refuses to start instead.
 
-**Register the wire types** on the node before it carries any traffic. The package registers nothing on import: type registration is node-scoped, and doing it inside the actor would be too late for a node whose leader process starts after a connection is already established.
+**Register the wire types** on the node before it carries any traffic. The package registers nothing on import: type registration is node-scoped, and doing it inside the actor would be too late for a node whose leader process starts after a connection is already established. `Init` checks the node's registry and returns an error naming the fix, because without the types every vote fails to encode and no leader is ever elected.
 
 ```go
 gen.ApplicationSpec{

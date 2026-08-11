@@ -9,3 +9,5 @@ const (
 	DefaultCollectInterval = 10 * time.Second
 	DefaultTopN            = 50
 )
+
+const docsURL = "https://docs.ergo.services/extra-library/actors/metrics"

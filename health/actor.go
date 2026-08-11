@@ -112,6 +112,12 @@ func (a *Actor) ProcessInit(process gen.Process, args ...any) (rr error) {
 		a.options.CheckInterval = DefaultCheckInterval
 	}
 
+	// The wire types have to be on the node by now: a Register or Heartbeat that cannot
+	// be decoded is a signal missing from the probe answer, silently.
+	if err := a.checkNetworkTypes(); err != nil {
+		return err
+	}
+
 	a.signals = make(map[gen.Atom]*signalState)
 
 	// build initial (healthy, no signals) responses
@@ -125,6 +131,21 @@ func (a *Actor) ProcessInit(process gen.Process, args ...any) (rr error) {
 	// schedule first heartbeat check
 	a.scheduleCheck()
 
+	return nil
+}
+
+// checkNetworkTypes reports whether the node can decode what this actor is sent.
+func (a *Actor) checkNetworkTypes() error {
+	for _, v := range NetworkTypes() {
+		t := reflect.TypeOf(v)
+		got, ok := a.Node().Network().LookupType(fmt.Sprintf("#%s/%s", t.PkgPath(), t.Name()))
+		if ok == true && got == t {
+			continue
+		}
+		return fmt.Errorf("%s is not registered on this node: pass health.NetworkTypes() to "+
+			"ApplicationSpec.Network.RegisterTypes (or Network().RegisterTypes) before the node "+
+			"serves traffic - see %s", t, docsURL)
+	}
 	return nil
 }
 

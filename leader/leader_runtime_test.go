@@ -6,6 +6,7 @@ package leader
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"ergo.services/ergo/gen"
@@ -25,7 +26,7 @@ func (b *bareLeader) Init(args ...any) (Options, error) {
 }
 
 func TestRuntime_EmbeddingActorIsEnough(t *testing.T) {
-	actor, err := unit.Spawn(t, func() gen.ProcessBehavior { return &bareLeader{} },
+	actor, err := spawnLeader(t, func() gen.ProcessBehavior { return &bareLeader{} },
 		gen.ProcessOptions{}, "bare-cluster")
 	check.NoError(t, err, "embedding leader.Actor must satisfy ActorBehavior")
 
@@ -87,7 +88,7 @@ func (r *runtimeLeader) HandleMessage(from gen.PID, message any) error {
 func spawnRuntime(t *testing.T) (*unit.Subject, *runtimeLeader) {
 	t.Helper()
 
-	actor, err := unit.Spawn(t, func() gen.ProcessBehavior { return &runtimeLeader{} },
+	actor, err := spawnLeader(t, func() gen.ProcessBehavior { return &runtimeLeader{} },
 		gen.ProcessOptions{}, "runtime-cluster")
 	check.NoError(t, err)
 	return actor, actor.Behavior().(*runtimeLeader)
@@ -182,7 +183,7 @@ func TestRuntime_PartialTimeoutConfigurationResolves(t *testing.T) {
 				electionTimeoutMax: tc.max,
 			}
 		}
-		actor, err := unit.Spawn(t, factory, gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
+		actor, err := spawnLeader(t, factory, gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
 		check.NoError(t, err, tc.name+": a partial configuration must resolve, not fail")
 
 		behavior := actor.Behavior().(*TestLeader)
@@ -209,4 +210,27 @@ func TestRuntime_LeaveIsNotUndoneByInFlightTraffic(t *testing.T) {
 	check.Equal(t, 1, behavior.viewSize(),
 		"a peer the consumer withdrew must not be re-admitted by its own traffic")
 	check.Contains(t, inspectKey(t, actor, "ergo:dropped_by_reason"), "withdrawn_peer")
+}
+
+// Without the protocol types on the node every vote fails to encode and the cluster never
+// converges, with nothing at startup to say why. The actor refuses to start instead.
+func TestRuntime_RefusesToStartWithoutRegisteredTypes(t *testing.T) {
+	sub := unit.Prepare(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
+		gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
+
+	err := sub.Run()
+	if err == nil {
+		t.Fatal("expected Init to refuse an unregistered protocol")
+	}
+	for _, want := range []string{"msgVote", "NetworkTypes()", docsURL} {
+		if strings.Contains(err.Error(), want) == false {
+			t.Fatalf("error %q does not carry %q", err, want)
+		}
+	}
+
+	// The same actor starts once the node knows its protocol.
+	ok := unit.Prepare(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
+		gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
+	check.NoError(t, ok.Node().Network().RegisterTypes(NetworkTypes()))
+	check.NoError(t, ok.Run())
 }

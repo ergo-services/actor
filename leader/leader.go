@@ -41,6 +41,8 @@ type ActorBehavior interface {
 // healthy follower. gen/process.go:63-73 allows a behavior to report any name.
 const processKindCandidate gen.ProcessKind = "candidate"
 
+const docsURL = "https://docs.ergo.services/extra-library/actors/leader"
+
 type Actor struct {
 	gen.Process
 
@@ -289,8 +291,29 @@ func (l *Actor) ProcessInit(process gen.Process, args ...any) (rr error) {
 	}
 	l.termChangedAt = time.Now()
 
+	// The protocol types have to be on the node by now: without them every vote fails to
+	// encode, silently, leaving a cluster that never converges.
+	if err := l.checkNetworkTypes(); err != nil {
+		return err
+	}
+
 	l.resetElectionTimer()
 
+	return nil
+}
+
+// checkNetworkTypes reports whether the node can encode this actor's own protocol.
+func (l *Actor) checkNetworkTypes() error {
+	for _, v := range NetworkTypes() {
+		t := reflect.TypeOf(v)
+		got, ok := l.Node().Network().LookupType(fmt.Sprintf("#%s/%s", t.PkgPath(), t.Name()))
+		if ok == true && got == t {
+			continue
+		}
+		return fmt.Errorf("%s is not registered on this node: pass leader.NetworkTypes() to "+
+			"ApplicationSpec.Network.RegisterTypes (or Network().RegisterTypes) before the node "+
+			"serves traffic - see %s", t, docsURL)
+	}
 	return nil
 }
 

@@ -69,3 +69,48 @@ type signalState struct {
 
 // messageCheckTimeouts is an internal timer message for periodic heartbeat checking.
 type messageCheckTimeouts struct{}
+
+// NetworkTypes returns the wire types this actor exchanges with the processes it serves.
+//
+// Registering them is the caller's job, not the library's, and it must happen before the
+// node carries any traffic. Type registration is node-scoped, so it cannot be done from a
+// package init(); doing it in the actor's own Init would be too late for a node whose
+// health process starts after a connection is already established.
+//
+// Declare them on the application that hosts the actor, which is processed during
+// ApplicationLoad before any of its processes are spawned:
+//
+//	gen.ApplicationSpec{
+//	    Network: gen.ApplicationNetwork{
+//	        RegisterTypes:  health.NetworkTypes(),
+//	        RegisterErrors: health.ErrorTypes(),
+//	    },
+//	}
+//
+// or register them on the node directly before it starts serving:
+//
+//	node.Network().RegisterTypes(health.NetworkTypes())
+//
+// Init refuses to start if the node does not know them: a remote Register or Heartbeat
+// that cannot be decoded is a signal silently missing from the probe answer, which is
+// worse than not starting.
+func NetworkTypes() []any {
+	return []any{
+		Probe(0),
+		time.Duration(0),
+		RegisterRequest{},
+		RegisterResponse{},
+		UnregisterRequest{},
+		UnregisterResponse{},
+		MessageHeartbeat{},
+		MessageSignalUp{},
+		MessageSignalDown{},
+	}
+}
+
+// ErrorTypes returns the sentinel errors this actor sends over the wire. There are none
+// today - failures ride as strings on the responses - so this exists to keep consumer
+// setup uniform and keep working if that changes.
+func ErrorTypes() []error {
+	return nil
+}

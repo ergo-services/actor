@@ -49,7 +49,7 @@ func discoverPeersViaVoteReply(actor *unit.Subject, clusterID string, peers ...g
 // Driving elections via real timer expiry instead of hand-injecting
 // msgElectionTimeout{} (the pattern leader_test.go uses 27 times per the audit).
 func TestHarness_FireTimers_DrivesARealElection(t *testing.T) {
-	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
+	actor, _ := spawnLeader(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
 		gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
 	behavior := actor.Behavior().(*TestLeader)
 
@@ -77,7 +77,7 @@ func TestHarness_FireTimers_DrivesARealElection(t *testing.T) {
 
 // Delivering a down for a peer.
 func TestHarness_DeliverDown_RemovesADiscoveredPeer(t *testing.T) {
-	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
+	actor, _ := spawnLeader(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
 		gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
 	behavior := actor.Behavior().(*TestLeader)
 
@@ -98,7 +98,7 @@ func TestHarness_DeliverDown_RemovesADiscoveredPeer(t *testing.T) {
 
 // Injecting Monitor failure.
 func TestHarness_OnMonitor_InjectedFailureIsObservable(t *testing.T) {
-	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
+	actor, _ := spawnLeader(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
 		gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
 
 	peer := gen.PID{Node: "peer@host", ID: 100, Creation: 1}
@@ -116,7 +116,7 @@ func TestHarness_OnMonitor_InjectedFailureIsObservable(t *testing.T) {
 
 // Injecting Send failure for a named target.
 func TestHarness_OnSend_InjectedFailureIsObservable(t *testing.T) {
-	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
+	actor, _ := spawnLeader(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
 		gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
 
 	peer := gen.PID{Node: "peer@host", ID: 100, Creation: 1}
@@ -141,7 +141,7 @@ func TestHarness_OnSend_InjectedFailureIsObservable(t *testing.T) {
 // Inspect arm, leader.go:237-239 - 0.0% covered per the audit's coverage-gaps
 // section.)
 func TestHarness_Inspect_DrivenThroughTheRealRequestPath(t *testing.T) {
-	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
+	actor, _ := spawnLeader(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
 		gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
 
 	// Inspect (testing/unit/unit.go:467) pushes a real MailboxMessageTypeInspect
@@ -162,7 +162,7 @@ func TestHarness_Inspect_DrivenThroughTheRealRequestPath(t *testing.T) {
 
 // Delivering exits.
 func TestHarness_DeliverExit_ReachesProcessRunsExitArm(t *testing.T) {
-	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
+	actor, _ := spawnLeader(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
 		gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
 
 	dead := gen.PID{Node: "linked@host", ID: 100, Creation: 1}
@@ -188,7 +188,7 @@ func TestHarness_ShouldLog_ObservesAConfigurationWarning(t *testing.T) {
 			heartbeatInterval:  150, // >= ElectionTimeoutMin: leader.go:145-148 warns
 		}
 	}
-	actor, err := unit.Spawn(t, factory, gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
+	actor, err := spawnLeader(t, factory, gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
 	check.NoError(t, err)
 
 	// ShouldLog (testing/check/asserts.go:876) reads the mock logger's recording,
@@ -205,7 +205,7 @@ func TestHarness_ShouldLog_ObservesAConfigurationWarning(t *testing.T) {
 // misses quorum can never start a second election on its own.
 func TestCanary_L2_CandidateReArmsElectionTimerAfterMissedQuorum(t *testing.T) {
 
-	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
+	actor, _ := spawnLeader(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
 		gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
 	behavior := actor.Behavior().(*TestLeader)
 
@@ -241,7 +241,7 @@ func TestCanary_L2_CandidateReArmsElectionTimerAfterMissedQuorum(t *testing.T) {
 // ClusterID guard drops it and the joiner never learns the real term.
 func TestCanary_L1_StaleTermVoteRejectionCarriesClusterID(t *testing.T) {
 
-	actor, _ := unit.Spawn(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
+	actor, _ := spawnLeader(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
 		gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})
 	behavior := actor.Behavior().(*TestLeader)
 
@@ -262,4 +262,25 @@ func TestCanary_L1_StaleTermVoteRejectionCarriesClusterID(t *testing.T) {
 	actor.ShouldSend().To(remote2).
 		Message(msgVoteReply{ClusterID: "test-cluster", Term: 10, Granted: false}).
 		Once().Assert()
+}
+
+// spawnLeader prepares, registers the protocol types the way an application's Load does,
+// then runs Init. The actor refuses to start without them, so the two-phase form is the
+// only way to give it the precondition it has in production.
+func spawnLeader(t testing.TB, factory gen.ProcessFactory, options gen.ProcessOptions, args ...any) (*unit.Subject, error) {
+	sub := unit.Prepare(t, factory, options, args...)
+	if err := sub.Node().Network().RegisterTypes(NetworkTypes()); err != nil {
+		return nil, err
+	}
+	return sub, sub.Run()
+}
+
+// spawnLeaderOnNode is spawnLeader for a test that needs a named node.
+func spawnLeaderOnNode(t testing.TB, node gen.Atom, register gen.Atom, factory gen.ProcessFactory, args ...any) (*unit.Subject, error) {
+	n := unit.StartNode(t, node, gen.NodeOptions{})
+	sub := n.PrepareRegister(register, factory, gen.ProcessOptions{}, args...)
+	if err := n.Network().RegisterTypes(NetworkTypes()); err != nil {
+		return nil, err
+	}
+	return sub, sub.Run()
 }

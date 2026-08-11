@@ -23,9 +23,9 @@ package leader
 //	node.Network().RegisterTypes(leader.NetworkTypes())
 //	node.Network().RegisterErrors(leader.ErrorTypes())
 //
-// Skipping this is not a startup failure: a single-node cluster works, and so does one
-// whose peers happen to connect after every process is up. It shows up later as peers
-// that never converge, because their messages cannot be decoded.
+// Init refuses to start if the node does not know these types: without them every vote
+// fails to encode, so the alternative is a healthy-looking node that never joins an
+// election.
 func NetworkTypes() []any {
 	return []any{
 		msgVote{},

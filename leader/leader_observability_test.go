@@ -47,7 +47,7 @@ func factoryObsLeader() gen.ProcessFactory {
 func spawnObs(t *testing.T, peers int) (*unit.Subject, *obsLeader) {
 	t.Helper()
 
-	actor, err := unit.Spawn(t, factoryObsLeader(), gen.ProcessOptions{}, "obs-cluster")
+	actor, err := spawnLeader(t, factoryObsLeader(), gen.ProcessOptions{}, "obs-cluster")
 	check.NoError(t, err)
 
 	behavior := actor.Behavior().(*obsLeader)
@@ -274,7 +274,7 @@ func spawnConfirm(t *testing.T, confirm bool, confirmErr error) (*unit.Subject, 
 	factory := func() gen.ProcessBehavior {
 		return &confirmLeader{confirm: confirm, confirmErr: confirmErr}
 	}
-	actor, err := unit.Spawn(t, factory, gen.ProcessOptions{}, "confirm-cluster")
+	actor, err := spawnLeader(t, factory, gen.ProcessOptions{}, "confirm-cluster")
 	check.NoError(t, err)
 	return actor, actor.Behavior().(*confirmLeader)
 }
@@ -387,7 +387,7 @@ func TestQuorum_SinglePeerDoesNotSelfElect(t *testing.T) {
 // majority of its own view and keeps leadership indefinitely.
 func TestMinClusterSize_LeaderStepsDownWhenViewShrinksBelowFloor(t *testing.T) {
 	factory := func() gen.ProcessBehavior { return &obsLeader{minClusterSize: 3} }
-	actor, err := unit.Spawn(t, factory, gen.ProcessOptions{}, "obs-cluster")
+	actor, err := spawnLeader(t, factory, gen.ProcessOptions{}, "obs-cluster")
 	check.NoError(t, err)
 	behavior := actor.Behavior().(*obsLeader)
 
@@ -410,7 +410,7 @@ func TestMinClusterSize_LeaderStepsDownWhenViewShrinksBelowFloor(t *testing.T) {
 // A node below the floor must not campaign at all, and must say why.
 func TestMinClusterSize_BelowFloorDoesNotCampaign(t *testing.T) {
 	factory := func() gen.ProcessBehavior { return &obsLeader{minClusterSize: 3} }
-	actor, err := unit.Spawn(t, factory, gen.ProcessOptions{}, "obs-cluster")
+	actor, err := spawnLeader(t, factory, gen.ProcessOptions{}, "obs-cluster")
 	check.NoError(t, err)
 	behavior := actor.Behavior().(*obsLeader)
 
@@ -457,7 +457,7 @@ func (i *inspectLeader) HandleInspect(from gen.PID, item ...string) map[string]s
 }
 
 func TestObservability_ConsumerInspectDoesNotEraseElectionState(t *testing.T) {
-	actor, err := unit.Spawn(t, func() gen.ProcessBehavior { return &inspectLeader{} },
+	actor, err := spawnLeader(t, func() gen.ProcessBehavior { return &inspectLeader{} },
 		gen.ProcessOptions{}, "obs-cluster")
 	check.NoError(t, err)
 
@@ -483,7 +483,7 @@ func TestGhostTTL_RollingDeployDoesNotInflateQuorum(t *testing.T) {
 	factory := func() gen.ProcessBehavior {
 		return &obsLeader{minClusterSize: 3, ghostTTL: 1}
 	}
-	actor, err := unit.Spawn(t, factory, gen.ProcessOptions{}, "obs-cluster")
+	actor, err := spawnLeader(t, factory, gen.ProcessOptions{}, "obs-cluster")
 	check.NoError(t, err)
 	behavior := actor.Behavior().(*obsLeader)
 
