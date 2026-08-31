@@ -212,8 +212,10 @@ func TestRuntime_LeaveIsNotUndoneByInFlightTraffic(t *testing.T) {
 	check.Contains(t, inspectKey(t, actor, "ergo:dropped_by_reason"), "withdrawn_peer")
 }
 
-// Without the protocol types on the node every vote fails to encode and the cluster never
-// converges, with nothing at startup to say why. The actor refuses to start instead.
+// Without the protocol on the node every vote fails to encode and the cluster never
+// converges, with nothing at startup to say why. The actor refuses to start instead, and
+// says where to read about the fix. Registering here itself would be worse than useless:
+// a type added after a connection is up never reaches that wire.
 func TestRuntime_RefusesToStartWithoutRegisteredTypes(t *testing.T) {
 	sub := unit.Prepare(t, factoryTestLeader("test-cluster", []gen.ProcessID{}),
 		gen.ProcessOptions{}, "test-cluster", []gen.ProcessID{})

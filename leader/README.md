@@ -8,9 +8,11 @@ Full documentation: [docs.ergo.services/extra-library/actors/leader](https://doc
 
 ## Three things to get right
 
-The last two fail quietly if skipped - the node starts, nothing errors, and the problem appears later as a cluster that never converges. The first one used to, and now refuses to start instead.
+All three fail quietly if skipped - the node starts, nothing errors, and the problem appears later as a cluster that never converges. The first one refuses to start instead.
 
-**Register the wire types** on the node before it carries any traffic. The package registers nothing on import: type registration is node-scoped, and doing it inside the actor would be too late for a node whose leader process starts after a connection is already established. `Init` checks the node's registry and returns an error naming the fix, because without the types every vote fails to encode and no leader is ever elected.
+**Register the wire types** on the node before it carries any traffic. `Init` checks the node's registry and returns an error naming the fix, because without them every vote fails to encode and no leader is ever elected.
+
+The actor deliberately does not register them itself. Registration is node-scoped, so a type added once a connection is already established never reaches that wire - a node that forgot, then started a leader that registered late, would pass every check and still never join an election. A loud error at startup is the only honest outcome.
 
 ```go
 gen.ApplicationSpec{
@@ -22,7 +24,7 @@ gen.ApplicationSpec{
 }
 ```
 
-`ApplicationSpec.Network` is processed during `ApplicationLoad`, before any process in the application is spawned. Registering on the node directly works too, as long as it happens before the node starts serving.
+`ApplicationSpec.Network` is processed during `ApplicationLoad`, before any process in the application is spawned. `node.Network().RegisterTypes(leader.NetworkTypes())` before the node starts serving works too.
 
 **Withdraw peers your discovery no longer lists**, with `Leave`. Not strictly mandatory - `GhostTTL` drops an unreachable peer after five seconds as a safety net - but it is the only precise mechanism, and it matters most where node names are dynamic. Every replaced pod leaves an unreachable member behind, and the framework reports everything on a lost node as a connection loss whatever actually happened to it. Without a bound, two rolling deploys of a five-node cluster produce a quorum of seven that the five living nodes can never assemble.
 
