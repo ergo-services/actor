@@ -4,16 +4,15 @@ go 1.21
 
 require (
 	ergo.services/actor/metrics v0.0.0
-	ergo.services/application/observer v0.0.0-20250927194435-52bffba635a1
-	ergo.services/ergo v1.999.321-0.20260225222959-cb4e7499386a
+	ergo.services/application/observer v0.1.1-0.20260901123004-83a1d62b96d9
+	ergo.services/ergo v1.999.321-0.20260902074819-ba6b95f9188d
 	github.com/prometheus/client_golang v1.20.5
 )
 
 require (
-	ergo.services/meta v0.0.0-20240904054930-a97f6add8a78 // indirect
+	ergo.services/meta/sse v0.2.1-0.20260901122738-1cc6bbe402cb // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/klauspost/compress v1.17.9 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/prometheus/client_model v0.6.1 // indirect

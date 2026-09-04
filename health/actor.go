@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -85,9 +84,8 @@ func (a *Actor) ProcessInit(process gen.Process, args ...any) (rr error) {
 	if lib.Recover() {
 		defer func() {
 			if r := recover(); r != nil {
-				pc, fn, line, _ := runtime.Caller(2)
-				a.Log().Panic("Health initialization failed. Panic reason: %#v at %s[%s:%d]",
-					r, runtime.FuncForPC(pc).Name(), fn, line)
+				a.Log().Panic("Health initialization failed. Panic reason: %#v at %s",
+					r, lib.PanicOrigin())
 				rr = gen.TerminateReasonPanic
 			}
 		}()
@@ -112,6 +110,12 @@ func (a *Actor) ProcessInit(process gen.Process, args ...any) (rr error) {
 		a.options.CheckInterval = DefaultCheckInterval
 	}
 
+	// The wire types have to be on the node by now: a Register or Heartbeat that cannot
+	// be decoded is a signal missing from the probe answer, silently.
+	if err := a.checkNetworkTypes(); err != nil {
+		return err
+	}
+
 	a.signals = make(map[gen.Atom]*signalState)
 
 	// build initial (healthy, no signals) responses
@@ -128,6 +132,21 @@ func (a *Actor) ProcessInit(process gen.Process, args ...any) (rr error) {
 	return nil
 }
 
+// checkNetworkTypes reports whether the node can decode what this actor is sent.
+func (a *Actor) checkNetworkTypes() error {
+	for _, v := range NetworkTypes() {
+		t := reflect.TypeOf(v)
+		got, ok := a.Node().Network().LookupType(fmt.Sprintf("#%s/%s", t.PkgPath(), t.Name()))
+		if ok == true && got == t {
+			continue
+		}
+		return fmt.Errorf("%s is not registered on this node: pass health.NetworkTypes() to "+
+			"ApplicationSpec.Network.RegisterTypes (or Network().RegisterTypes) before the node "+
+			"serves traffic - see %s", t, docsURL)
+	}
+	return nil
+}
+
 // ProcessRun is the main message loop.
 func (a *Actor) ProcessRun() (rr error) {
 	var message *gen.MailboxMessage
@@ -135,9 +154,8 @@ func (a *Actor) ProcessRun() (rr error) {
 	if lib.Recover() {
 		defer func() {
 			if r := recover(); r != nil {
-				pc, fn, line, _ := runtime.Caller(2)
-				a.Log().Panic("Health terminated. Panic reason: %#v at %s[%s:%d]",
-					r, runtime.FuncForPC(pc).Name(), fn, line)
+				a.Log().Panic("Health terminated. Panic reason: %#v at %s",
+					r, lib.PanicOrigin())
 				rr = gen.TerminateReasonPanic
 			}
 		}()
@@ -244,6 +262,10 @@ func (a *Actor) ProcessTerminate(reason error) {
 		a.checkTimer = nil
 	}
 	a.behavior.Terminate(reason)
+}
+
+func (a *Actor) ProcessKind() gen.ProcessKind {
+	return gen.ProcessKindHealth
 }
 
 //

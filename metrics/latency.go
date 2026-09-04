@@ -38,7 +38,7 @@ type latencyMetrics struct {
 	maxLat   float64
 	stressed float64
 	buckets  []float64
-	heap *topNHeap
+	heap     *topNHeap
 }
 
 func (lm *latencyMetrics) init(cm *sync.Map, registry *prometheus.Registry, nodeLabels prometheus.Labels) {

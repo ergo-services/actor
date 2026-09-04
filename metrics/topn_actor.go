@@ -63,6 +63,18 @@ func (a *topNActor) Init(args ...any) error {
 	a.interval = opts.Interval
 	a.owner = opts.Owner
 
+	// Same normalization the primary metrics actor does for its own copy of
+	// these two (actor.go). Without it a zero from the caller is not a
+	// no-op but a fault: SendAfter(0) fires immediately, so the flush loop
+	// re-arms with no delay and spins, and a topN of zero makes
+	// topNHeap.Observe discard every observation.
+	if a.topN < 1 {
+		a.topN = DefaultTopN
+	}
+	if a.interval < 1 {
+		a.interval = DefaultCollectInterval
+	}
+
 	// register process name for direct addressing
 	if err := a.RegisterName(gen.Atom("radar_topn_" + a.metricName)); err != nil {
 		return fmt.Errorf("topn actor: register name: %w", err)

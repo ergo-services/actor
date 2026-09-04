@@ -126,6 +126,21 @@ func gaugeVecFromMap(cm *sync.Map, name string) *prometheus.GaugeVec {
 //
 
 // ProcessInit
+// checkNetworkTypes reports whether the node can decode what this actor is sent.
+func (a *Actor) checkNetworkTypes() error {
+	for _, v := range NetworkTypes() {
+		t := reflect.TypeOf(v)
+		got, ok := a.Node().Network().LookupType(fmt.Sprintf("#%s/%s", t.PkgPath(), t.Name()))
+		if ok == true && got == t {
+			continue
+		}
+		return fmt.Errorf("%s is not registered on this node: pass metrics.NetworkTypes() to "+
+			"ApplicationSpec.Network.RegisterTypes (or Network().RegisterTypes) before the node "+
+			"serves traffic - see %s", t, docsURL)
+	}
+	return nil
+}
+
 func (a *Actor) ProcessInit(process gen.Process, args ...any) (rr error) {
 	var ok bool
 
@@ -139,9 +154,8 @@ func (a *Actor) ProcessInit(process gen.Process, args ...any) (rr error) {
 	if lib.Recover() {
 		defer func() {
 			if r := recover(); r != nil {
-				pc, fn, line, _ := runtime.Caller(2)
-				a.Log().Panic("Metrics initialization failed. Panic reason: %#v at %s[%s:%d]",
-					r, runtime.FuncForPC(pc).Name(), fn, line)
+				a.Log().Panic("Metrics initialization failed. Panic reason: %#v at %s",
+					r, lib.PanicOrigin())
 				rr = gen.TerminateReasonPanic
 			}
 		}()
@@ -181,6 +195,12 @@ func (a *Actor) ProcessInit(process gen.Process, args ...any) (rr error) {
 	}
 	if a.options.TopN < 1 {
 		a.options.TopN = DefaultTopN
+	}
+
+	// The wire types have to be on the node by now: an observation that cannot be decoded
+	// is a metric that silently stays flat.
+	if err := a.checkNetworkTypes(); err != nil {
+		return err
 	}
 
 	// Primary/standalone: base metrics + HTTP + collection timer.
@@ -517,9 +537,8 @@ func (a *Actor) ProcessRun() (rr error) {
 	if lib.Recover() {
 		defer func() {
 			if r := recover(); r != nil {
-				pc, fn, line, _ := runtime.Caller(2)
-				a.Log().Panic("Metrics terminated. Panic reason: %#v at %s[%s:%d]",
-					r, runtime.FuncForPC(pc).Name(), fn, line)
+				a.Log().Panic("Metrics terminated. Panic reason: %#v at %s",
+					r, lib.PanicOrigin())
 				rr = gen.TerminateReasonPanic
 			}
 		}()
@@ -922,6 +941,10 @@ func (a *Actor) inspect(from gen.PID, item ...string) map[string]string {
 
 func (a *Actor) ProcessTerminate(reason error) {
 	a.behavior.Terminate(reason)
+}
+
+func (a *Actor) ProcessKind() gen.ProcessKind {
+	return gen.ProcessKindMetrics
 }
 
 //

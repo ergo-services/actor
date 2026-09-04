@@ -1,0 +1,9 @@
+*~
+coverage.txt
+coverage.*
+coverage.html
+*.swp
+cover.out
+.DS_Store
+.idea
+
